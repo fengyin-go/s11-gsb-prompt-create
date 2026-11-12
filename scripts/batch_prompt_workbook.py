@@ -393,6 +393,66 @@ def run_cross_project_gate(
     return payload
 
 
+def run_cross_project_batch_gate(parent, config_path, config, records):
+    import tempfile
+    checker=resolve_config_path(config['checker'],config_path.parent)
+    registry=resolve_config_path(config['registry'],config_path.parent)
+    # The checker accepts JSONL candidates and retains batch coverage/history/platform rules.
+    with tempfile.TemporaryDirectory(prefix='s11-candidates-') as temp:
+        source=Path(temp)/'candidates.jsonl'
+        source.write_text(''.join(json.dumps({'folder':r['子文件夹名称'],'task_type':r['任务类型'],'prompt':r['提示词']},ensure_ascii=False)+'\n' for r in records))
+        command=[sys.executable,str(checker),'--batch-dir',str(parent),'--registry',str(registry),'--prompts-file',str(source)]
+        for key in ('require_registry','require_coverage','require_platform_corpus','bootstrap_no_history','root_fallback'):
+            if config.get(key):command += ['--'+key.replace('_','-')]
+        if config.get('min_peer_batches') is not None:command += ['--min-peer-batches',str(config['min_peer_batches'])]
+        if config.get('cross_project_root'):command += ['--cross-project-root',str(resolve_config_path(config['cross_project_root'],config_path.parent))]
+        if config.get('workbook'):command += ['--workbook',str(config['workbook'])]
+        done=subprocess.run(command,capture_output=True,text=True,timeout=float(config.get('timeout_seconds') or 300))
+        try: result=json.loads(done.stdout)
+        except ValueError:raise SystemExit('跨项目检查器输出无效：'+done.stderr[-1000:])
+        if done.returncode or not result.get('ok'):raise SystemExit('整批跨项目闸未通过：'+json.dumps(result,ensure_ascii=False))
+        return result
+
+
+def update_many(parent, candidates, *, repo=None, topic_map=None):
+    """Validate full candidate batch once and commit workbook/registry together under the registry lock."""
+    from repo_topic_policy import load_topic_map
+    from check_prompt_g16 import check as check_g16
+    path=workbook_path(parent,None)
+    records=read_workbook(path)
+    by_name={r['子文件夹名称']:r for r in records}
+    seen=set()
+    for item in candidates:
+        name=item.get('folder')
+        if name in seen or name not in by_name or not str(item.get('prompt','')).strip():raise SystemExit('批量候选编号重复、缺失或题面为空')
+        seen.add(name)
+        row=by_name[name]
+        if item.get('task_type',row['任务类型']) != row['任务类型']:raise SystemExit('批量更新不能改变冻结题型')
+        row.update(提示词=item['prompt'],状态='已生成',更新时间=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        if 'note' in item:row['备注']=item['note']
+    repo=repo or detect_repo(parent)
+    topic=load_topic_map(parent=parent,repo=repo,explicit=topic_map,required=True)
+    cfg_path,cfg=load_cross_project_config(parent)
+    if not cfg_path:raise SystemExit('缺少跨项目配置')
+    registry=resolve_config_path(cfg['registry'],cfg_path.parent)
+    # Batch shape/count checks run once; per-prompt admission and all-pair comparisons remain included.
+    with cross_registry_lib.registry_lock(registry,timeout_seconds=float(cfg.get('lock_timeout_seconds') or 120)):
+        gate=run_write_gates(parent,records,repo=repo,topic_map=topic,max_per_mode=3)
+        difficulty=check_g16([(r['子文件夹名称'],r['任务类型'],r['提示词']) for r in records],{r['子文件夹名称']:r.get('备注','') for r in records})
+        if not gate['ok'] or not difficulty['ok']:raise SystemExit('整批主题/难度/去重未通过：'+json.dumps({'gate':gate,'difficulty':difficulty},ensure_ascii=False))
+        cross=run_cross_project_batch_gate(parent,cfg_path,cfg,records)
+        original=path.read_bytes()
+        try:
+            write_workbook(path,records)
+            payload=cross_registry_lib.load_registry(registry)
+            cross_registry_lib.upsert_entry(payload,path,batch_id=parent.name,batch_dir=parent,status='finalized',prompt_count=sum(bool(r['提示词']) for r in records),extra={'row_count':len(records)})
+            cross_registry_lib.save_registry(registry,payload)
+        except Exception:
+            path.write_bytes(original)
+            raise
+    return {'ok':True,'updated':len(seen),'gate':gate,'cross_project':cross}
+
+
 def run_write_gates(
     parent: Path,
     records: list[dict[str, str]],
@@ -990,8 +1050,9 @@ def locate_project(project: Path, workbook: str | None) -> dict[str, object]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["scan", "update", "pick", "locate-project"])
+    parser.add_argument("command", choices=["scan", "update", "update-many", "pick", "locate-project"])
     parser.add_argument("--parent")
+    parser.add_argument("--candidates-file",help="update-many 的 JSON 候选列表")
     parser.add_argument("--project")
     parser.add_argument("--workbook")
     parser.add_argument("--folder")
@@ -1034,7 +1095,10 @@ def main() -> None:
     if not args.parent:
         raise SystemExit(f"{args.command} requires --parent")
     parent = Path(args.parent).expanduser().resolve()
-    if args.command == "scan":
+    if args.command == 'update-many':
+        if not args.candidates_file:raise SystemExit('缺少 --candidates-file')
+        result=update_many(parent,json.loads(Path(args.candidates_file).read_text()),repo=Path(args.repo).resolve() if args.repo else None,topic_map=args.topic_map)
+    elif args.command == "scan":
         result = scan(parent, args.workbook)
     elif args.command == "update":
         if not args.folder:

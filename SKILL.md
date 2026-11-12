@@ -45,7 +45,7 @@ GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositorie
 
 一个提示词对应一个任务目录、一个独立 GitHub 仓库、一份 origin、一份 workspace。远端只创建 `main`。初始时 main 指向基准提交；运行侧之后把产物提交推进到同一 main。初始快照使用 `/commit/<initial_commit>`，不要要求运行后的 main 仍停在基线，也不要另建基线、A、B 分支。
 
-任务目录名、任务 ID、容器名和 GitHub 任务仓库名统一为 `<原仓库名>-<提示词编号两位数>-<任务类型英文名>`。提示词编号取 task_plan 的 sequence，例如原仓库 `cc10003` 的第一题为 Bugfix 时，目录和仓库都命名为 `cc10003-01-bugfix`。五类英文名固定为 `development`、`bugfix`、`optimization`、`refactor`、`migration`。`--start-index` 仅控制工作簿“编号”列的起始值，不参与目录或仓库命名。同一 root 的不同批次不得复用任务 ID（容器名就是任务 ID）。仓库名已被占用且未登记在本批清单时立即停止，不换名、不认领；只有清单明确登记的仓库可恢复复用。旧 `s11-六位数字` 批次保持原样并可继续读取，不自动重命名；旧批次的扩容需单独处理，不与新命名混用。
+任务目录名、任务 ID、容器名和 GitHub 任务仓库名统一为 `<原仓库名>-<提示词编号两位数>-<任务类型英文名>`。提示词编号取 task_plan 的 sequence，例如原仓库 `cc10003` 的第一题为 Bugfix 时，目录和仓库都命名为 `cc10003-01-bugfix`。五类英文名固定为 `development`、`bugfix`、`optimization`、`refactor`、`migration`。`--start-index` 仅控制工作簿“编号”列的起始值，不参与目录或仓库命名。同一 root 的不同批次不得复用任务 ID（容器名就是任务 ID）。仓库名已被占用且未登记在本批清单时立即停止，不换名、不认领；只有清单明确登记的仓库可恢复复用。旧 `s11-六位数字` 批次保持原样并可继续读取，不自动重命名；已启动批次可按冻结的完整计划恢复未完成建仓，沿用原编号和 start-index。旧批次的额外扩容需单独处理，不与新命名混用。
 
 旧 A/B 批次不自动删除、改名或覆盖；本入口会拒绝。需要迁移时先明确保留哪次产物并单独处理，不能把两侧结果合成一次运行。
 
@@ -70,7 +70,7 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123
 ```
 
-依赖只复制到 origin，保留链接、权限和时间戳，不用硬链接，不提交依赖。至少在代表性 origin 和实际任务环境分别做无安装启动 smoke，全栈覆盖前后端。宿主 native 依赖不能直接搬到 Linux 容器；workspace 起跑前必须连被忽略文件也没有，运行容器自行按锁文件安装。
+依赖只复制到 origin，保留链接、权限和时间戳，不用硬链接，不提交依赖。至少在代表性 origin 和实际任务环境分别做无安装启动 smoke，全栈覆盖前后端。宿主 native 依赖不能直接搬到 Linux 容器。交接时 workspace 仍为干净克隆；运行侧按冻结基线在实际 Linux 镜像中一次准备、验证依赖，再向每题对应目录复制，起跑只允许有运行侧有效缓存回执解释的忽略依赖；初始和产物 Git 快照均不得包含依赖。详见 [运行侧缓存规则](../s11-feedback-run/references/performance.md)。
 
 `--verify` 只读复检原始计划对应的任务、origin/main 与远端仅有 main；运行后 main 可以推进，origin 和 task.json 的初始 SHA 保留。输出容量三块座位、实际题数、各类型数量、成功与失败清单。限流按上面的等待策略重试；其他失败不静默重试、不覆盖已有内容。
 
@@ -102,7 +102,7 @@ python3 <skill>/scripts/check_cross_project_prompts.py --batch-dir <batch目录>
 
 ## 4. 交接给运行侧
 
-读 [references/handoff-schema.md](references/handoff-schema.md)，准备真实的领域/语言元数据、逐项 requirements 和可执行录屏方案。`_config/settings.json` 中镜像摘要必须来自本机真实预检，不猜另一架构的值。原 `cc-domain-task-create` 不是本批必经入口。
+读 [references/handoff-schema.md](references/handoff-schema.md)，准备真实的领域/语言元数据、逐项 requirements 和可执行录屏方案。`_config/settings.json` 中镜像摘要必须来自本机真实预检，不猜另一架构的值。原 `cc-domain-task-create` 不是本批必经入口。同一基础仓库、基线和镜像的所属领域、子方向、语言/框架、Harness、Harness 版本、操作系统及环境可复现等级仅在 metadata.common 核实一次，交接生成公共档案供其余题和后续同身份批次复用，不逐题重新生成。
 
 ```bash
 python3 <skill>/scripts/prepare_handoff.py --root <root> --batch b1111-01 --metadata <batch目录>/handoff-metadata.json

@@ -37,11 +37,9 @@ def validate_generation(parent, rows, origin):
     path, config = workbook.load_cross_project_config(parent)
     if not path:
         raise ValueError("缺少跨项目查重配置")
-    for row in rows:
-        result = workbook.run_cross_project_gate(parent, path, config, folder=row["子文件夹名称"],
-                         task_type=row["任务类型"], prompt=row["提示词"])
-        if not result.get("ok"):
-            raise ValueError(f"{row['子文件夹名称']} 跨项目查重未通过")
+    result = workbook.run_cross_project_batch_gate(parent,path,config,rows)
+    if not result.get('ok'):
+        raise ValueError('整批跨项目查重未通过')
 
 
 def prepare(root, batch, metadata_file):
@@ -64,6 +62,24 @@ def prepare(root, batch, metadata_file):
     if not entries:
         raise ValueError("空批次不能交接")
     validate_generation(parent, rows, parent / entries[0]["task_id"] / "origin")
+    import sys
+    runtime_scripts = Path(__file__).resolve().parents[2]/'s11-feedback-run/scripts'
+    if str(runtime_scripts) not in sys.path: sys.path.insert(0,str(runtime_scripts))
+    import fbr_common
+    common = dict(meta.get('common', {}))
+    for key in fbr_common.FIELDS:
+        candidates = [row.get(key) for row in [common,*meta.get('tasks',{}).values()] if row.get(key) not in (None,'')]
+        if candidates and any(value != candidates[0] for value in candidates):
+            raise ValueError(f'同一基线公共字段 {key} 存在冲突，不逐题生成或覆盖')
+        if candidates: common[key]=candidates[0]
+    for key in ('harness','harness_version','os'):
+        if common.get(key) and common[key] != cfg[key]: raise ValueError(f'公共字段 {key} 与真实运行环境不符')
+        common[key]=cfg[key]
+    common_values={key:common.get(key) for key in fbr_common.FIELDS}
+    profile_path, shared_profile=fbr_common.profile(root,
+        {'source_repo':manifest.get('source_repo') or common.get('repo_id'), 'initial_commit':entries[0]['initial_commit'],'image_id':cfg['image_id']},
+        common_values, {'metadata':str(Path(metadata_file).resolve()),'sha256':__import__('hashlib').sha256(Path(metadata_file).read_bytes()).hexdigest()})
+    common.update(shared_profile['fields'])
     tasks, baselines, staged = [], {}, []
     for entry in entries:
         name = entry["task_id"]
@@ -79,7 +95,7 @@ def prepare(root, batch, metadata_file):
         prompt = row["提示词"]
         if not prompt.strip() or row["任务类型"] != entry["task_type"]:
             raise ValueError(f"{name} 缺少题面或题型与计划不一致")
-        data = {**meta.get("common", {}), **meta.get("tasks", {}).get(name, {})}
+        data = {**common, **meta.get("tasks", {}).get(name, {})}
         for key in ("repo_id", "domain", "subdirection", "language", "frameworks", "repro_level",
                     "requirements", "recording_plan", "dependency_smoke"):
             if not data.get(key):
@@ -99,7 +115,7 @@ def prepare(root, batch, metadata_file):
             raise ValueError("settings 缺少本机架构镜像 image_id；先真实预检，不填猜测值")
         initial = entry["initial_commit"]
         record = {k: data[k] for k in ("repo_id", "domain", "subdirection", "language", "frameworks", "repro_level", "requirements")}
-        record.update(task_id=name, batch=batch, task_type=entry["task_type"], prompt=prompt,
+        record.update(common_profile={"path":str(profile_path.relative_to(root)),"sha256":__import__("hashlib").sha256(profile_path.read_bytes()).hexdigest()}, task_id=name, batch=batch, task_type=entry["task_type"], prompt=prompt,
                       difficulty=data.get("difficulty", "困难"), initial_commit=initial, base_commit=initial,
                       task_repo=entry["repo"].split("/", 1)[1], task_repo_full=entry["repo"],
                       handoff_version=2, producer="s11-gsb-prompt-create", execution_mode="single",
@@ -117,7 +133,7 @@ def prepare(root, batch, metadata_file):
         if not any(workspace_dir.iterdir()):
             # Clone committed source only. Cached host dependencies stay in origin and are not mounted into the task container.
             hub.clone_branch(entry["repo_url"], "main", workspace_dir, full_clone=False,
-                             git_user_name=cfg.get("git_user_name"), git_user_email=cfg.get("git_user_email"))
+                             git_user_name=cfg.get("git_user_name"), git_user_email=cfg.get("git_user_email"), local_source=target/"origin")
         if git(workspace_dir, "rev-parse", "HEAD") != initial or git(workspace_dir, "status", "--porcelain", "--ignored"):
             raise ValueError(f"{name} workspace 不在干净初始提交")
         row_out = {k: record[k] for k in ("task_id", "repo_id", "initial_commit", "task_type", "difficulty", "baseline_id", "handoff_hash", "task_repo")}

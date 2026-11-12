@@ -127,6 +127,28 @@ class SingleFlow(unittest.TestCase):
         self.assertTrue(create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
                 owner="selftest", start_index=123, verify=True)["ok"])
 
+    def test_resume_legacy_batch_retains_frozen_ids(self):
+        self.wire_git()
+        result = self.build()
+        entry = result["tasks"][0]
+        old_folder = entry["folder"]
+        entry.update(folder="s11-000001", task_id="s11-000001")
+        entry.pop("number")
+        (self.parent / old_folder).rename(self.parent / entry["folder"])
+        create.save_json(self.parent / entry["folder"] / "task-seed.json", entry)
+        create.save_json(self.parent / create.MANIFEST, {"tasks": [entry]})
+        (self.parent / "tasks.xlsx").unlink()
+        resumed = self.build()
+        self.assertTrue(resumed["ok"])
+        self.assertEqual(resumed["tasks"][0], entry)
+        self.assertEqual(resumed["created_count"], 0)
+        row = workbook.read_workbook(self.parent / "tasks.xlsx")[0]
+        self.assertEqual(row["子文件夹名称"], "s11-000001")
+        self.assertEqual(row["编号"], "1")
+        with self.assertRaisesRegex(ValueError, "start-index"):
+            create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
+                preflight=self.parent / "startup-preflight.json", owner="selftest", start_index=2)
+
     def test_repository_name_includes_source_sequence_and_type_slug(self):
         self.assertEqual(create.source_repo_name("https://github.com/acme/cc10001.git"), "cc10001")
         self.assertEqual(create.source_repo_name("git@github.com:acme/cc10001.git"), "cc10001")

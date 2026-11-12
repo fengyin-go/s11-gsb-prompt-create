@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -158,16 +159,23 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             raise ValueError("最终基准提交没有出现在原始仓库远端分支")
     old = read_json(parent / MANIFEST) if (parent / MANIFEST).is_file() else {"tasks": []}
     known = {item["folder"]: item for item in old["tasks"]}
-    planned_names = {task_repo_name(base_repo_name, item["sequence"], item["slug"])
-                     for item in topic_map["task_plan"]}
+    # A batch started before directory naming changed must retain every frozen ID.
+    legacy = bool(known) and all(re.fullmatch(r"s11-\d{6}", name) for name in known)
+    def folder_for(item):
+        return (f"s11-{start_index + item['sequence'] - 1:06d}" if legacy else
+                task_repo_name(base_repo_name, item["sequence"], item["slug"]))
+    planned_names = {folder_for(item) for item in topic_map["task_plan"]}
     if set(known) - planned_names:
         raise ValueError("新计划遗漏既有任务或 start-index 已变；保留原任务编号和计划后再追加")
+    journal_path=parent/'creation-journal.json'
+    journal=read_json(journal_path) if journal_path.is_file() else {'source_repo':remote,'base_commit':commit,'tasks':{}}
+    if journal.get('source_repo')!=remote or journal.get('base_commit')!=commit:raise ValueError('建仓恢复日志不属于当前基线')
     tasks, failed, created, skipped = [], [], [], []
     for item in topic_map["task_plan"]:
         number = start_index + item["sequence"] - 1
         if number > 999999:
             raise ValueError("任务编号超过六位上限")
-        folder = task_repo_name(base_repo_name, item["sequence"], item["slug"])
+        folder = folder_for(item)
         target = parent / folder
         for other in parent.parent.glob(f"*/{folder}"):
             if other.resolve() != target.resolve() and ((other / "task.json").exists() or (other / "task-seed.json").exists()):
@@ -175,6 +183,8 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
         entry = {"folder": folder, "task_id": folder, "number": number, "task_type": item["task_type"],
                  "initial_commit": commit, "branch": "main", "topic": item["topic"],
                  "family": item["family"], "angle": item["angle"], "sequence": item["sequence"]}
+        if legacy:
+            entry.pop("number")
         previous = known.get(folder)
         if previous:
             for key in entry:
@@ -197,21 +207,34 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             skipped.append(entry)
         else:
             name = task_repo_name(base_repo_name, item["sequence"], item["slug"])
-            if hub.repo_exists(owner, name):
+            progress=journal['tasks'].get(folder,{})
+            exists=hub.repo_exists(owner,name)
+            if exists and progress.get('stage') not in ('created','pushed','cloned','verified'):
                 raise ValueError(f"候选仓库名已被占用且未登记在本批清单中，停止避免认领: {owner}/{name}")
+            if progress and progress.get('repo') != f'{owner}/{name}':raise ValueError('建仓日志的仓库归属不一致')
             entry.update(repo=f"{owner}/{name}", repo_url=f"https://github.com/{owner}/{name}")
-            if target.exists():
+            if target.exists() and not progress:
                 raise ValueError(f"目标 {target} 已存在但未登记，停止避免覆盖")
             if not dry_run:
-                hub.create_repo(owner, name, visibility)
-                hub.push_commit_to_branch(entry["repo_url"], commit, "main", source)
-                target.mkdir(parents=True)
-                hub.clone_branch(entry["repo_url"], "main", target / "origin", full_clone=False,
-                                 git_user_name=None, git_user_email=None)
-                (target / "workspace").mkdir()
+                def checkpoint(stage):
+                    journal['tasks'][folder]={'repo':entry['repo'],'initial_commit':commit,'stage':stage}
+                    save_json(journal_path,journal)
+                if not exists:
+                    checkpoint('creating')
+                    hub.create_repo(owner,name,visibility)
+                    checkpoint('created')
+                hub.push_commit_to_branch(entry['repo_url'],commit,'main',source)
+                checkpoint('pushed')
+                target.mkdir(parents=True,exist_ok=True)
+                if not (target/'origin').exists():
+                    hub.clone_branch(entry['repo_url'],'main',target/'origin',full_clone=False,
+                                     git_user_name=None,git_user_email=None,local_source=source)
+                checkpoint('cloned')
+                (target/'workspace').mkdir(exist_ok=True)
                 for rel in evidence.get("dependency_paths", []):
                     # macOS CoW clones; rsync preserves links and metadata elsewhere.
                     src, dst = source / rel, target / "origin" / rel
+                    if dst.exists():continue
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     command = ["cp", "-Rc", str(src), str(dst)] if sys.platform == "darwin" else ["cp", "-a", str(src), str(dst)]
                     result = hub.run_cmd(command)
@@ -220,6 +243,7 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
                 issues = verify_task(target, entry)
                 if issues:
                     raise ValueError(f"{folder}: {'；'.join(issues)}")
+                checkpoint('verified')
                 save_json(target / "task-seed.json", entry)
                 # Persist each completed task so a failed later task is safely resumable.
                 known[folder] = entry
@@ -235,7 +259,7 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
         for task in tasks:
             if task["folder"] not in by_name:
                 row = workbook.blank_record({"folder": task["folder"], "task_type": task["task_type"],
-                                             "number": str(task["number"])})
+                                             "number": str(task.get("number", int(task["task_id"][4:]) if legacy else 0))})
                 rows.append(row)
             elif by_name[task["folder"]]["任务类型"] != task["task_type"]:
                 raise ValueError("已有工作簿任务类型与计划不一致")

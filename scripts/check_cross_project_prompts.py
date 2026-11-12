@@ -482,6 +482,12 @@ def load_candidate_file(path: Path, task_type: str) -> list[dict[str, str]]:
         text = line.strip()
         if not text:
             continue
+        if text.startswith('{'):
+            row=json.loads(text)
+            if not isinstance(row,dict) or not isinstance(row.get('prompt'),str):raise ValueError('候选 JSONL 缺少 prompt')
+            items.append({'label':row.get('folder') or row.get('label') or f'{path.name}#{index}',
+                          'task_type':row.get('task_type',task_type),'prompt':row['prompt']})
+            continue
         fields = text.split("\t")
         if len(fields) >= 3:
             items.append({
