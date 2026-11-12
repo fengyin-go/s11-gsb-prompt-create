@@ -135,7 +135,9 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
     if not 1 <= start_index <= 999999:
         raise ValueError("start-index 必须在 1..999999")
     remote = hub.source_remote_url(source)
-    owner = owner or hub.owner_of(remote)
+    owner = owner or "fengyin-go"
+    if owner != "fengyin-go":
+        raise ValueError("数据仓库只允许创建在 fengyin-go 名下")
     base_repo_name = source_repo_name(remote)
     topic_map = load_topic_map(repo=source, parent=parent, explicit=topic_path,
                               required=True, expected_base_commit=commit)

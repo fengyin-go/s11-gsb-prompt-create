@@ -5,6 +5,8 @@ description: "solo11 单轮 pointwise 批量出题：真实启动基准仓库并
 
 # S11 批量出题
 
+本机数据仓库只允许发布到 GitHub 账号 `fengyin-go`。建仓和推送前核对目标 owner 与凭据实际账号；禁止使用 `fengyin-solo` 或自动回退到其他账号。旧交付链接与历史证据保持原样，迁移既有仓库需另行明确处理。
+
 从 `gsb-prompt-create` 复制的单次运行版本。先真实启动原始仓库、冻结依赖基线，再按业务 topic 排题位、建仓、生成首轮提示词，最后输出 `s11-feedback-run` 可直接读取的批次。不投递 Trae、不运行模型、不生成 Feedback。
 
 本 skill 内的脚本和类型规则独立维护；不要调用原 GSB 的 A/B 建仓脚本，或用共享 solo-create 脚本写表。本文命令中的 `<skill>` 指本 `SKILL.md` 所在目录。
