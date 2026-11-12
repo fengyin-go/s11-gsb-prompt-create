@@ -1,0 +1,2395 @@
+{
+  "gate_version": "2026-09-16-subject-mode-unique",
+  "repo": "/Users/fengyin/项目/字节/solo11/s11任务目录 1/dfzr10002/dfzr10002",
+  "rule": "GSB semantic-v2：每条题面必须落回一个业务 topic；同一「topic + 需求模式」只出 1 条，topic 不得超过 seat_capacity，源码模块只做总座位护栏",
+  "capacity": {
+    "capacity": 32,
+    "binding_limit": "topic",
+    "policy": "gsb-semantic-v2",
+    "topic_count": 16,
+    "topics": [
+      {
+        "id": "indicator",
+        "name": "指标口径管理",
+        "seat_capacity": 2
+      },
+      {
+        "id": "datasource",
+        "name": "分析数据源",
+        "seat_capacity": 2
+      },
+      {
+        "id": "query",
+        "name": "聚合查询配置",
+        "seat_capacity": 2
+      },
+      {
+        "id": "experiment",
+        "name": "分析实验管理",
+        "seat_capacity": 2
+      },
+      {
+        "id": "dataset",
+        "name": "分析数据集",
+        "seat_capacity": 2
+      },
+      {
+        "id": "chart",
+        "name": "可视化图表配置",
+        "seat_capacity": 2
+      },
+      {
+        "id": "report",
+        "name": "分析报告管理",
+        "seat_capacity": 2
+      },
+      {
+        "id": "service",
+        "name": "数据服务发布",
+        "seat_capacity": 2
+      },
+      {
+        "id": "dashboard",
+        "name": "数据看板",
+        "seat_capacity": 2
+      },
+      {
+        "id": "dimension",
+        "name": "分析维度管理",
+        "seat_capacity": 2
+      },
+      {
+        "id": "filter",
+        "name": "全局筛选器",
+        "seat_capacity": 2
+      },
+      {
+        "id": "schedule",
+        "name": "定时分析任务",
+        "seat_capacity": 2
+      },
+      {
+        "id": "export",
+        "name": "数据导出配置",
+        "seat_capacity": 2
+      },
+      {
+        "id": "cache",
+        "name": "查询缓存管理",
+        "seat_capacity": 2
+      },
+      {
+        "id": "model",
+        "name": "分析模型管理",
+        "seat_capacity": 2
+      },
+      {
+        "id": "log",
+        "name": "分析操作日志",
+        "seat_capacity": 2
+      }
+    ],
+    "topic_slots": 32,
+    "subject_count": 26,
+    "subjects": [
+      "App",
+      "Overview",
+      "__init__",
+      "cache",
+      "chart",
+      "client",
+      "config",
+      "dashboard",
+      "dataset",
+      "datasource",
+      "dimension",
+      "experiment",
+      "export",
+      "filter",
+      "frontend",
+      "indicator",
+      "log",
+      "main",
+      "model",
+      "query",
+      "report",
+      "schedule",
+      "schemas",
+      "seed",
+      "service",
+      "store"
+    ],
+    "subject_slots": 52,
+    "existing_slots": 52,
+    "invented_slots": 0,
+    "invented_ceiling": 0,
+    "invented_ratio_bound": 0,
+    "subject_total_slots": 52,
+    "mode_slots": 39,
+    "max_per_repo": 50,
+    "max_per_subject": 2,
+    "max_per_mode": 3,
+    "type_mix": {
+      "功能开发": 10,
+      "Bugfix": 10,
+      "功能优化": 10,
+      "代码重构": 1,
+      "依赖升级与迁移": 1
+    },
+    "disabled_task_types": [],
+    "reallocated": {},
+    "new_capability_ratio_limit": 1.0,
+    "verdict": "容量充足",
+    "rule": "容量 = min(单仓库上限, 既有主体数 × 每主体上限 + 0-1 新主体座位, 业务 topic 座位 / 既有主体座位, 需求模式数 × 每模式上限, profile 上限)；新主体只配功能开发且每个只坐一条",
+    "invented_rule": "0-1 新主体仍受业务证据、跨域、单主体一题与单批限流约束；capacity-first 不用建议类型比例缩减席位；strict-ratio 才按配额限制"
+  },
+  "topic_map": {
+    "version": 1,
+    "profile": "gsb-semantic-v2",
+    "type_policy": "capacity-first",
+    "repo": "https://github.com/daofaziran888/dfzr10002",
+    "base_commit": "338e2dd24b676e300b6dc021dc2477c28553d7c6",
+    "max_capacity": 32,
+    "topics": [
+      {
+        "id": "indicator",
+        "name": "指标口径管理",
+        "module": "indicator",
+        "keywords": [
+          "业务指标",
+          "指标口径",
+          "口径版本"
+        ],
+        "evidence": [
+          "backend/app/services/indicator.py",
+          "backend/app/routers/indicator.py",
+          "frontend/src/views/indicator/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "Bugfix"
+        ],
+        "notes": "业务指标口径、审批发布、版本和下游查询消费。"
+      },
+      {
+        "id": "datasource",
+        "name": "分析数据源",
+        "module": "datasource",
+        "keywords": [
+          "数据源连接",
+          "分析数据源",
+          "连接池"
+        ],
+        "evidence": [
+          "backend/app/services/datasource.py",
+          "backend/app/routers/datasource.py",
+          "frontend/src/views/datasource/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "优化既有能力"
+        ],
+        "notes": "数据源连接校验、启停、连接池和分析数据集依赖。"
+      },
+      {
+        "id": "query",
+        "name": "聚合查询配置",
+        "module": "query",
+        "keywords": [
+          "查询模板",
+          "聚合查询",
+          "模板版本"
+        ],
+        "evidence": [
+          "backend/app/services/query.py",
+          "backend/app/routers/query.py",
+          "frontend/src/views/query/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "Bugfix",
+          "优化既有能力"
+        ],
+        "notes": "查询模板审批发布、缓存参数、结果上限和执行超时。"
+      },
+      {
+        "id": "experiment",
+        "name": "分析实验管理",
+        "module": "experiment",
+        "keywords": [
+          "分析实验",
+          "实验编号",
+          "显著阈值"
+        ],
+        "evidence": [
+          "backend/app/services/experiment.py",
+          "backend/app/routers/experiment.py",
+          "frontend/src/views/experiment/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "Bugfix",
+          "优化既有能力"
+        ],
+        "notes": "实验生命周期、数据集、分组、基准区间和显著性判断。"
+      },
+      {
+        "id": "dataset",
+        "name": "分析数据集",
+        "module": "dataset",
+        "keywords": [
+          "分析数据集",
+          "数据集编号",
+          "刷新频率"
+        ],
+        "evidence": [
+          "backend/app/services/dataset.py",
+          "backend/app/routers/dataset.py",
+          "frontend/src/views/dataset/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "优化既有能力"
+        ],
+        "notes": "数据集字段、刷新代次、行数上限和下游图表实验依赖。"
+      },
+      {
+        "id": "chart",
+        "name": "可视化图表配置",
+        "module": "chart",
+        "keywords": [
+          "图表配置",
+          "可视化图表",
+          "坐标轴"
+        ],
+        "evidence": [
+          "backend/app/services/chart.py",
+          "backend/app/routers/chart.py",
+          "frontend/src/views/chart/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "优化既有能力"
+        ],
+        "notes": "图表数据绑定、坐标轴、筛选条件、刷新间隔和看板组合。"
+      },
+      {
+        "id": "report",
+        "name": "分析报告管理",
+        "module": "report",
+        "keywords": [
+          "分析报告",
+          "报告标题",
+          "报告模板"
+        ],
+        "evidence": [
+          "backend/app/services/report.py",
+          "backend/app/routers/report.py",
+          "frontend/src/views/report/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "Bugfix",
+          "结构改造"
+        ],
+        "notes": "报告生成、归档生命周期、数据集快照与生成任务恢复。"
+      },
+      {
+        "id": "service",
+        "name": "数据服务发布",
+        "module": "service",
+        "keywords": [
+          "数据服务",
+          "服务编号",
+          "消费应用"
+        ],
+        "evidence": [
+          "backend/app/services/service.py",
+          "backend/app/routers/service.py",
+          "frontend/src/views/service/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "优化既有能力"
+        ],
+        "notes": "数据服务发布、消费应用、响应字段、分页和缓存。"
+      },
+      {
+        "id": "dashboard",
+        "name": "数据看板",
+        "module": "dashboard",
+        "keywords": [
+          "看板面板",
+          "数据看板",
+          "可见范围"
+        ],
+        "evidence": [
+          "backend/app/services/dashboard.py",
+          "backend/app/routers/dashboard.py",
+          "frontend/src/views/dashboard/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "优化既有能力"
+        ],
+        "notes": "看板布局、图表集合、可见范围、刷新与回滚。"
+      },
+      {
+        "id": "dimension",
+        "name": "分析维度管理",
+        "module": "dimension",
+        "keywords": [
+          "分析维度",
+          "维度层级",
+          "维度版本"
+        ],
+        "evidence": [
+          "backend/app/services/dimension.py",
+          "backend/app/routers/dimension.py",
+          "frontend/src/views/dimension/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "Bugfix"
+        ],
+        "notes": "维度层级、字段、版本、发布废弃与图表筛选引用。"
+      },
+      {
+        "id": "filter",
+        "name": "全局筛选器",
+        "module": "filter",
+        "keywords": [
+          "全局筛选器",
+          "筛选器编号",
+          "联动维度"
+        ],
+        "evidence": [
+          "backend/app/services/filter.py",
+          "backend/app/routers/filter.py",
+          "frontend/src/views/filter/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "优化既有能力"
+        ],
+        "notes": "筛选器类型、默认值、可选值来源、联动维度与图表刷新。"
+      },
+      {
+        "id": "schedule",
+        "name": "定时分析任务",
+        "module": "schedule",
+        "keywords": [
+          "定时任务",
+          "调度表达式",
+          "分析类型"
+        ],
+        "evidence": [
+          "backend/app/services/schedule.py",
+          "backend/app/routers/schedule.py",
+          "frontend/src/views/schedule/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "优化既有能力"
+        ],
+        "notes": "定时任务调度、输入参数、输出目标、通知与报告生成。"
+      },
+      {
+        "id": "export",
+        "name": "数据导出配置",
+        "module": "export",
+        "keywords": [
+          "导出模板",
+          "导出上限",
+          "字段选择"
+        ],
+        "evidence": [
+          "backend/app/services/export.py",
+          "backend/app/routers/export.py",
+          "frontend/src/views/export/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "Bugfix",
+          "优化既有能力"
+        ],
+        "notes": "导出模板格式、字段、筛选参数、行数上限和下载结果。"
+      },
+      {
+        "id": "cache",
+        "name": "查询缓存管理",
+        "module": "cache",
+        "keywords": [
+          "缓存规则",
+          "缓存目标",
+          "淘汰策略"
+        ],
+        "evidence": [
+          "backend/app/services/cache.py",
+          "backend/app/routers/cache.py",
+          "frontend/src/views/cache/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "Bugfix"
+        ],
+        "notes": "缓存目标、失效条件、预加载、内存上限与查询数据集联动。"
+      },
+      {
+        "id": "model",
+        "name": "分析模型管理",
+        "module": "model",
+        "keywords": [
+          "分析模型",
+          "模型版本",
+          "训练数据集"
+        ],
+        "evidence": [
+          "backend/app/services/model.py",
+          "backend/app/routers/model.py",
+          "frontend/src/views/model/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "优化既有能力"
+        ],
+        "notes": "模型训练、部署版本、训练数据集、上下线与预测兼容。"
+      },
+      {
+        "id": "log",
+        "name": "分析操作日志",
+        "module": "log",
+        "keywords": [
+          "操作日志",
+          "日志编号",
+          "查询耗时"
+        ],
+        "evidence": [
+          "backend/app/services/log.py",
+          "backend/app/routers/log.py",
+          "frontend/src/views/log/index.tsx"
+        ],
+        "seat_capacity": 2,
+        "allowed_families": [
+          "新增能力",
+          "结构改造"
+        ],
+        "notes": "全模块操作留痕、审计、脱敏、归档和持久化。"
+      }
+    ],
+    "task_plan": [
+      {
+        "sequence": 1,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "indicator",
+        "family": "新增能力",
+        "angle": "指标发布前的口径版本冻结与查询模板消费确认"
+      },
+      {
+        "sequence": 2,
+        "slug": "bugfix",
+        "task_type": "Bugfix",
+        "topic": "indicator",
+        "family": "Bugfix",
+        "angle": "指标名称检索与当前筛选导出一致性"
+      },
+      {
+        "sequence": 3,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "datasource",
+        "family": "新增能力",
+        "angle": "数据源连通性复检与数据集依赖启用门禁"
+      },
+      {
+        "sequence": 4,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "datasource",
+        "family": "优化既有能力",
+        "angle": "连接池耗尽时的退避启用与依赖拒绝边界"
+      },
+      {
+        "sequence": 5,
+        "slug": "bugfix",
+        "task_type": "Bugfix",
+        "topic": "query",
+        "family": "Bugfix",
+        "angle": "查询模板审批推进与服务缓存失效联动"
+      },
+      {
+        "sequence": 6,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "query",
+        "family": "优化既有能力",
+        "angle": "查询模板缓存上限与并发命中的一致性重算"
+      },
+      {
+        "sequence": 7,
+        "slug": "bugfix",
+        "task_type": "Bugfix",
+        "topic": "experiment",
+        "family": "Bugfix",
+        "angle": "实验启动结束关闭的状态推进与看板计数"
+      },
+      {
+        "sequence": 8,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "experiment",
+        "family": "优化既有能力",
+        "angle": "实验显著性与数据集新鲜度联合复核视图"
+      },
+      {
+        "sequence": 9,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "dataset",
+        "family": "新增能力",
+        "angle": "数据集批量质量画像与启用资格裁定"
+      },
+      {
+        "sequence": 10,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "dataset",
+        "family": "优化既有能力",
+        "angle": "数据集刷新代次与最近刷新一致性回填"
+      },
+      {
+        "sequence": 11,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "chart",
+        "family": "新增能力",
+        "angle": "图表可见范围与全局筛选器权限编排"
+      },
+      {
+        "sequence": 12,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "chart",
+        "family": "优化既有能力",
+        "angle": "图表刷新间隔与筛选联动的最小重绘"
+      },
+      {
+        "sequence": 13,
+        "slug": "bugfix",
+        "task_type": "Bugfix",
+        "topic": "report",
+        "family": "Bugfix",
+        "angle": "报告生成生命周期与数据集快照落库"
+      },
+      {
+        "sequence": 14,
+        "slug": "refactor",
+        "task_type": "代码重构",
+        "topic": "report",
+        "family": "结构改造",
+        "angle": "报告生成编排从同步写入重构为可恢复任务"
+      },
+      {
+        "sequence": 15,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "service",
+        "family": "新增能力",
+        "angle": "数据服务发布前的消费方授权与缓存隔离"
+      },
+      {
+        "sequence": 16,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "service",
+        "family": "优化既有能力",
+        "angle": "数据服务分页上限与缓存秒数的冲突裁决"
+      },
+      {
+        "sequence": 17,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "dashboard",
+        "family": "新增能力",
+        "angle": "看板可见范围与跨维筛选的权限继承"
+      },
+      {
+        "sequence": 18,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "dashboard",
+        "family": "优化既有能力",
+        "angle": "看板面板布局版本快照与定向回滚"
+      },
+      {
+        "sequence": 19,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "dimension",
+        "family": "新增能力",
+        "angle": "维度层级包导入导出与图表引用兼容"
+      },
+      {
+        "sequence": 20,
+        "slug": "bugfix",
+        "task_type": "Bugfix",
+        "topic": "dimension",
+        "family": "Bugfix",
+        "angle": "维度发布废弃动作后的引用完整性修复"
+      },
+      {
+        "sequence": 21,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "filter",
+        "family": "新增能力",
+        "angle": "筛选器批量联动维度绑定与冲突优先级"
+      },
+      {
+        "sequence": 22,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "filter",
+        "family": "优化既有能力",
+        "angle": "筛选器选项定位与默认值回退"
+      },
+      {
+        "sequence": 23,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "schedule",
+        "family": "新增能力",
+        "angle": "定时任务调度窗口冲突预演与报告生成顺延"
+      },
+      {
+        "sequence": 24,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "schedule",
+        "family": "优化既有能力",
+        "angle": "定时任务跨午夜执行与通知失败边界"
+      },
+      {
+        "sequence": 25,
+        "slug": "bugfix",
+        "task_type": "Bugfix",
+        "topic": "export",
+        "family": "Bugfix",
+        "angle": "导出模板过滤结果与详情路由冲突修复"
+      },
+      {
+        "sequence": 26,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "export",
+        "family": "优化既有能力",
+        "angle": "导出上限字段选择与缓存快照的一致性"
+      },
+      {
+        "sequence": 27,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "cache",
+        "family": "新增能力",
+        "angle": "缓存规则失效依赖图与预加载回填"
+      },
+      {
+        "sequence": 28,
+        "slug": "bugfix",
+        "task_type": "Bugfix",
+        "topic": "cache",
+        "family": "Bugfix",
+        "angle": "缓存目标检索与停用残留失效"
+      },
+      {
+        "sequence": 29,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "model",
+        "family": "新增能力",
+        "angle": "模型训练数据版本锁定与批量部署准入"
+      },
+      {
+        "sequence": 30,
+        "slug": "optimization",
+        "task_type": "功能优化",
+        "topic": "model",
+        "family": "优化既有能力",
+        "angle": "模型部署与数据集字段漂移的兼容降级"
+      },
+      {
+        "sequence": 31,
+        "slug": "development",
+        "task_type": "功能开发",
+        "topic": "log",
+        "family": "新增能力",
+        "angle": "操作日志按对象聚合、敏感字段脱敏与越权隔离"
+      },
+      {
+        "sequence": 32,
+        "slug": "migration",
+        "task_type": "依赖升级与迁移",
+        "topic": "log",
+        "family": "结构改造",
+        "angle": "操作日志从内存表迁移到追加式持久存储"
+      }
+    ],
+    "source": "/Users/fengyin/项目/字节/solo11/s11任务目录 1/dfzr10002/batches/b1112-01/repo-topic-map.json"
+  },
+  "modules": [
+    {
+      "module": "App",
+      "keywords": [
+        "一站",
+        "与应",
+        "与数",
+        "业数",
+        "产品",
+        "任务",
+        "企业",
+        "作台",
+        "作日",
+        "供指",
+        "值班",
+        "值班管理员",
+        "全局",
+        "全局筛选器",
+        "出配",
+        "分析",
+        "分析实验管理",
+        "分析实验设计",
+        "分析报告管理",
+        "分析操作日志",
+        "分析数据源",
+        "分析数据集",
+        "分析模型管理",
+        "分析维度管理",
+        "前值",
+        "务发",
+        "化图",
+        "发布",
+        "口径",
+        "可视",
+        "可视化图表配置",
+        "合查",
+        "向企",
+        "告管",
+        "品经",
+        "图表",
+        "型管",
+        "存管",
+        "完整",
+        "定时"
+      ]
+    },
+    {
+      "module": "Overview",
+      "keywords": [
+        "业务",
+        "业务模块",
+        "今日",
+        "今日新增",
+        "任务",
+        "作日",
+        "先看",
+        "先看总量再看异常",
+        "全局",
+        "全局筛选器",
+        "关键",
+        "关键指标",
+        "再看",
+        "出配",
+        "分析",
+        "分析实验管理",
+        "分析报告管理",
+        "分析操作日志",
+        "分析数据源",
+        "分析数据集",
+        "分析模型管理",
+        "分析维度管理",
+        "务发",
+        "务模",
+        "化图",
+        "发布",
+        "口径",
+        "可视",
+        "可视化图表配置",
+        "各业",
+        "合查",
+        "告管",
+        "图表",
+        "块的",
+        "型管",
+        "处理",
+        "存管",
+        "定时",
+        "定时分析任务",
+        "实验"
+      ]
+    },
+    {
+      "module": "__init__",
+      "keywords": [
+        "一按",
+        "业务",
+        "业务模块路由汇总",
+        "个业",
+        "会把",
+        "会把内置类型覆盖",
+        "会报",
+        "值就",
+        "入再",
+        "入再暴露",
+        "内置",
+        "再暴",
+        "函数",
+        "函数注解在运行时",
+        "别名",
+        "务模",
+        "可能",
+        "名字",
+        "名导",
+        "名撞",
+        "名有",
+        "和内",
+        "在运",
+        "块名",
+        "块就",
+        "块路",
+        "型覆",
+        "字时",
+        "字直",
+        "就会",
+        "就叫",
+        "把内",
+        "按别",
+        "按名",
+        "按名字直接",
+        "撞车",
+        "数注",
+        "暴露",
+        "有可",
+        "某个"
+      ]
+    },
+    {
+      "module": "cache",
+      "keywords": [
+        "一条",
+        "上限",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于查询缓存管",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于查",
+        "交校",
+        "会被",
+        "作会",
+        "停用",
+        "停用配置",
+        "停用配置等动作",
+        "允许",
+        "全量",
+        "内存",
+        "内存上限",
+        "出可",
+        "出查",
+        "分页",
+        "列里",
+        "则已",
+        "则执",
+        "则编",
+        "前过"
+      ]
+    },
+    {
+      "module": "chart",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于可视化图表",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "丢弃",
+        "于可",
+        "交校",
+        "会被",
+        "作会",
+        "停用",
+        "停用配置",
+        "停用配置等动作",
+        "允许",
+        "全量",
+        "出可",
+        "分页",
+        "列里",
+        "刷新",
+        "刷新间隔",
+        "前过",
+        "务规",
+        "务规则",
+        "动作",
+        "化图",
+        "单条",
+        "原因"
+      ]
+    },
+    {
+      "module": "client",
+      "keywords": [
+        "一句",
+        "一请",
+        "口请",
+        "口返",
+        "句可",
+        "可读",
+        "后端",
+        "地址",
+        "封装",
+        "抛网",
+        "抛网络错误",
+        "拼后",
+        "拼后端地址",
+        "据未",
+        "接口",
+        "接口请求失败",
+        "接口返回",
+        "数据未更新",
+        "更新",
+        "未更",
+        "未送",
+        "求失",
+        "求封",
+        "求未",
+        "留一",
+        "的说",
+        "的说明",
+        "端地",
+        "给页",
+        "给页脚留一句可读",
+        "络错",
+        "统一",
+        "统一请求封装",
+        "网络",
+        "脚留",
+        "请求",
+        "请求未送达",
+        "返回",
+        "送达",
+        "错误"
+      ]
+    },
+    {
+      "module": "config",
+      "keywords": [
+        "作台",
+        "分析",
+        "工作",
+        "据分",
+        "数据分析工作台",
+        "析工",
+        "环境",
+        "端口",
+        "行环",
+        "行配",
+        "跨域",
+        "运行",
+        "运行环境",
+        "运行配置",
+        "配置"
+      ]
+    },
+    {
+      "module": "dashboard",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于数据看板可",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于数",
+        "交校",
+        "会被",
+        "作会",
+        "停用",
+        "停用配置",
+        "停用配置等动作",
+        "允许",
+        "全量",
+        "出可",
+        "出数",
+        "分页",
+        "列里",
+        "创建",
+        "创建人",
+        "刷新",
+        "刷新频率",
+        "前过",
+        "务规",
+        "动作"
+      ]
+    },
+    {
+      "module": "dataset",
+      "keywords": [
+        "一条",
+        "上限",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于分析数据集",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于分",
+        "交校",
+        "会被",
+        "作会",
+        "停用",
+        "停用配置",
+        "停用配置等动作",
+        "允许",
+        "全量",
+        "出分",
+        "出可",
+        "分析",
+        "分析数据集",
+        "分析数据集业务规",
+        "分析数据集接口",
+        "分页",
+        "列里",
+        "刷新",
+        "刷新频率"
+      ]
+    },
+    {
+      "module": "datasource",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于分析数据源",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于分",
+        "交校",
+        "会被",
+        "作会",
+        "停用",
+        "停用配置",
+        "停用配置等动作",
+        "允许",
+        "全量",
+        "凭据",
+        "出分",
+        "出可",
+        "分析",
+        "分析数据源",
+        "分析数据源业务规",
+        "分析数据源接口",
+        "分页",
+        "列里",
+        "前过",
+        "务规"
+      ]
+    },
+    {
+      "module": "dimension",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于分析维度管",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于分",
+        "交审",
+        "会被",
+        "作会",
+        "允许",
+        "全量",
+        "关系",
+        "出分",
+        "出可",
+        "分析",
+        "分析维度",
+        "分析维度已",
+        "分析维度已登记",
+        "分析维度管理",
+        "分析维度管理业务",
+        "分析维度管理接口",
+        "分页",
+        "列里",
+        "前过",
+        "动作"
+      ]
+    },
+    {
+      "module": "experiment",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于分析实验管",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于分",
+        "会被",
+        "作会",
+        "允许",
+        "全量",
+        "关闭",
+        "关闭实验",
+        "关闭实验等动作",
+        "准区",
+        "出分",
+        "出可",
+        "分析",
+        "分析实验",
+        "分析实验已",
+        "分析实验已登记",
+        "分析实验管理",
+        "分析实验管理业务",
+        "分析实验管理接口",
+        "分析数据集",
+        "分组"
+      ]
+    },
+    {
+      "module": "export",
+      "keywords": [
+        "一条",
+        "上限",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于数据导出配",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于数",
+        "交校",
+        "会被",
+        "作会",
+        "停用",
+        "停用配置",
+        "停用配置等动作",
+        "允许",
+        "全量",
+        "出上",
+        "出可",
+        "出数",
+        "出格",
+        "出模",
+        "出配",
+        "分页",
+        "列里",
+        "前过",
+        "动作"
+      ]
+    },
+    {
+      "module": "filter",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于全局筛选器",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于全",
+        "交校",
+        "会被",
+        "作会",
+        "值来",
+        "停用",
+        "停用配置",
+        "停用配置等动作",
+        "允许",
+        "全局",
+        "全局筛选器",
+        "全局筛选器业务规",
+        "全局筛选器接口",
+        "全量",
+        "关联",
+        "关联字段",
+        "出全",
+        "出可",
+        "分页",
+        "列里"
+      ]
+    },
+    {
+      "module": "frontend",
+      "keywords": [
+        "作台",
+        "分析",
+        "工作",
+        "据分",
+        "数据分析工作台",
+        "析工"
+      ]
+    },
+    {
+      "module": "indicator",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于指标口径管",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "业务指标",
+        "业务指标已",
+        "业务指标已登记",
+        "丢弃",
+        "于指",
+        "交审",
+        "会被",
+        "作会",
+        "允许",
+        "全量",
+        "公式",
+        "出可",
+        "出指",
+        "分页",
+        "列里",
+        "前过",
+        "务指",
+        "动作",
+        "单条",
+        "原因",
+        "发布"
+      ]
+    },
+    {
+      "module": "log",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于分析操作日",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于分",
+        "会被",
+        "作人",
+        "作会",
+        "作对",
+        "作日",
+        "作时",
+        "作类",
+        "允许",
+        "全量",
+        "出分",
+        "出可",
+        "分析",
+        "分析操作日志",
+        "分析操作日志业务",
+        "分析操作日志接口",
+        "分页",
+        "列里",
+        "前过",
+        "动作"
+      ]
+    },
+    {
+      "module": "main",
+      "keywords": [
+        "业务",
+        "作台",
+        "例数",
+        "健康",
+        "健康检查",
+        "入口",
+        "分析",
+        "务入",
+        "务已",
+        "务模",
+        "卡片",
+        "各业",
+        "后端",
+        "后端服务入口",
+        "启动",
+        "块的",
+        "处理",
+        "处理量汇总成看板",
+        "就绪",
+        "工作",
+        "已经",
+        "康检",
+        "总成",
+        "成看",
+        "把各",
+        "把各业务模块的待",
+        "据分",
+        "据已",
+        "数据分析工作台",
+        "服务",
+        "析工",
+        "检查",
+        "概览",
+        "模块",
+        "汇总",
+        "理量",
+        "的待",
+        "监听",
+        "看板",
+        "确认"
+      ]
+    },
+    {
+      "module": "model",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "下线",
+        "下线模型",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于分析模型管",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于分",
+        "会被",
+        "作会",
+        "允许",
+        "入字",
+        "全量",
+        "出分",
+        "出可",
+        "分析",
+        "分析模型",
+        "分析模型已",
+        "分析模型已登记",
+        "分析模型管理",
+        "分析模型管理业务",
+        "分析模型管理接口",
+        "分页",
+        "列里",
+        "前过"
+      ]
+    },
+    {
+      "module": "query",
+      "keywords": [
+        "一条",
+        "上限",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于聚合查询配",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于聚",
+        "交审",
+        "会被",
+        "作会",
+        "停用",
+        "停用模板",
+        "停用模板等动作",
+        "允许",
+        "全量",
+        "出可",
+        "出聚",
+        "分页",
+        "列里",
+        "前过",
+        "动作",
+        "单条",
+        "原因",
+        "参数",
+        "参数定义"
+      ]
+    },
+    {
+      "module": "report",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于分析报告管",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于分",
+        "会被",
+        "作会",
+        "允许",
+        "全量",
+        "关联",
+        "关联数据集",
+        "出分",
+        "出可",
+        "分析",
+        "分析周期",
+        "分析报告",
+        "分析报告已",
+        "分析报告已登记",
+        "分析报告管理",
+        "分析报告管理业务",
+        "分析报告管理接口",
+        "分页",
+        "列里",
+        "删除"
+      ]
+    },
+    {
+      "module": "schedule",
+      "keywords": [
+        "一条",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于定时分析任",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于定",
+        "交校",
+        "任务",
+        "任务名称",
+        "任务编号",
+        "会被",
+        "作会",
+        "停用",
+        "停用配置",
+        "停用配置等动作",
+        "允许",
+        "入参",
+        "全量",
+        "出可",
+        "出定",
+        "出目",
+        "分析",
+        "分析类型",
+        "分页",
+        "列里"
+      ]
+    },
+    {
+      "module": "schemas",
+      "keywords": [
+        "一条",
+        "上限",
+        "与各",
+        "业务",
+        "业务指标明细结构",
+        "交的",
+        "任务",
+        "任务名称",
+        "任务编号",
+        "作人",
+        "作对",
+        "作日",
+        "作时",
+        "作类",
+        "作结",
+        "修改",
+        "值来",
+        "入参",
+        "入字",
+        "公式",
+        "关系",
+        "关联",
+        "关联字段",
+        "关联数据集",
+        "内存",
+        "内存上限",
+        "准区",
+        "凭据",
+        "出上",
+        "出入",
+        "出数",
+        "出格",
+        "出模",
+        "出目",
+        "分析",
+        "分析周期",
+        "分析实验明细结构",
+        "分析报告明细结构",
+        "分析数据集",
+        "分析模型明细结构"
+      ]
+    },
+    {
+      "module": "seed",
+      "keywords": [
+        "上限",
+        "个模",
+        "任务",
+        "任务名称",
+        "任务编号",
+        "作人",
+        "作对",
+        "作日",
+        "作时",
+        "作类",
+        "例数",
+        "便起",
+        "值来",
+        "入参",
+        "入字",
+        "全局",
+        "全局筛选器样例",
+        "公式",
+        "关系",
+        "关联",
+        "关联字段",
+        "关联数据集",
+        "内存",
+        "内存上限",
+        "准区",
+        "几条",
+        "凭据",
+        "出上",
+        "出数",
+        "出格",
+        "出目",
+        "出配",
+        "分析",
+        "分析周期",
+        "分析实验管理样例",
+        "分析报告管理样例",
+        "分析操作日志样例",
+        "分析数据源样例",
+        "分析数据集",
+        "分析数据集样例"
+      ]
+    },
+    {
+      "module": "service",
+      "keywords": [
+        "一条",
+        "上限",
+        "下并",
+        "下的",
+        "下的全量数据",
+        "不允",
+        "不允许的动作会被",
+        "不在",
+        "不在允许的状态序",
+        "不存",
+        "不存在或已归档",
+        "不存在时给出可读",
+        "不属",
+        "不属于数据服务发",
+        "不报",
+        "不报错",
+        "不是",
+        "与状",
+        "与筛",
+        "业务",
+        "丢弃",
+        "于数",
+        "交审",
+        "会被",
+        "作会",
+        "停用",
+        "停用服务",
+        "停用服务等动作",
+        "允许",
+        "全量",
+        "出可",
+        "出数",
+        "分页",
+        "分页上限",
+        "列里",
+        "前过",
+        "务发",
+        "务名",
+        "务已",
+        "务执"
+      ]
+    },
+    {
+      "module": "store",
+      "keywords": [
+        "一份",
+        "下来",
+        "业务",
+        "业务模块",
+        "个业",
+        "今日",
+        "今日新增",
+        "仓库",
+        "份可",
+        "例数",
+        "依赖",
+        "保证",
+        "保证克隆下来就能",
+        "克隆",
+        "内存",
+        "内存数据仓库",
+        "准库",
+        "前实",
+        "务模",
+        "只依",
+        "可流",
+        "可流转的示例数据",
+        "可筛",
+        "块准",
+        "处理",
+        "备一",
+        "备一份可筛选",
+        "存数",
+        "实现",
+        "实项",
+        "就能",
+        "常量",
+        "库访",
+        "异常量",
+        "当前",
+        "当前实现只依赖标",
+        "待处",
+        "待处理",
+        "成数",
+        "换成"
+      ]
+    }
+  ],
+  "demand_modes": [
+    "代码理解",
+    "代码重构收拢",
+    "依赖升级与迁移与流程",
+    "列表定位与筛选",
+    "导入导出",
+    "批量操作",
+    "持久化与一致性",
+    "新增展示视图",
+    "权限与归属",
+    "状态流转",
+    "缺陷处置",
+    "规则与阈值",
+    "边界与空态"
+  ],
+  "occupied_subject_modes": {
+    "indicator|状态流转": [
+      "dfzr10002-final-prompts.txt#1"
+    ],
+    "indicator|列表定位与筛选": [
+      "dfzr10002-final-prompts.txt#2"
+    ],
+    "datasource|规则与阈值": [
+      "dfzr10002-final-prompts.txt#3"
+    ],
+    "datasource|边界与空态": [
+      "dfzr10002-final-prompts.txt#4"
+    ],
+    "query|缺陷处置": [
+      "dfzr10002-final-prompts.txt#5"
+    ],
+    "query|持久化与一致性": [
+      "dfzr10002-final-prompts.txt#6"
+    ],
+    "experiment|边界与空态": [
+      "dfzr10002-final-prompts.txt#7"
+    ],
+    "experiment|新增展示视图": [
+      "dfzr10002-final-prompts.txt#8"
+    ],
+    "dataset|批量操作": [
+      "dfzr10002-final-prompts.txt#9"
+    ],
+    "dataset|新增展示视图": [
+      "dfzr10002-final-prompts.txt#10"
+    ],
+    "chart|权限与归属": [
+      "dfzr10002-final-prompts.txt#11"
+    ],
+    "chart|列表定位与筛选": [
+      "dfzr10002-final-prompts.txt#12"
+    ],
+    "report|边界与空态": [
+      "dfzr10002-final-prompts.txt#13"
+    ],
+    "report|代码重构收拢": [
+      "dfzr10002-final-prompts.txt#14"
+    ],
+    "service|导入导出": [
+      "dfzr10002-final-prompts.txt#15"
+    ],
+    "service|持久化与一致性": [
+      "dfzr10002-final-prompts.txt#16"
+    ],
+    "dashboard|权限与归属": [
+      "dfzr10002-final-prompts.txt#17"
+    ],
+    "dashboard|批量操作": [
+      "dfzr10002-final-prompts.txt#18"
+    ],
+    "dimension|导入导出": [
+      "dfzr10002-final-prompts.txt#19"
+    ],
+    "dimension|状态流转": [
+      "dfzr10002-final-prompts.txt#20"
+    ],
+    "filter|批量操作": [
+      "dfzr10002-final-prompts.txt#21"
+    ],
+    "filter|规则与阈值": [
+      "dfzr10002-final-prompts.txt#22"
+    ],
+    "schedule|规则与阈值": [
+      "dfzr10002-final-prompts.txt#23"
+    ],
+    "schedule|持久化与一致性": [
+      "dfzr10002-final-prompts.txt#24"
+    ],
+    "export|缺陷处置": [
+      "dfzr10002-final-prompts.txt#25"
+    ],
+    "export|新增展示视图": [
+      "dfzr10002-final-prompts.txt#26"
+    ],
+    "cache|权限与归属": [
+      "dfzr10002-final-prompts.txt#27"
+    ],
+    "cache|状态流转": [
+      "dfzr10002-final-prompts.txt#28"
+    ],
+    "model|导入导出": [
+      "dfzr10002-final-prompts.txt#29"
+    ],
+    "model|列表定位与筛选": [
+      "dfzr10002-final-prompts.txt#30"
+    ],
+    "log|缺陷处置": [
+      "dfzr10002-final-prompts.txt#31"
+    ],
+    "log|依赖升级与迁移与流程": [
+      "dfzr10002-final-prompts.txt#32"
+    ]
+  },
+  "occupied_subjects": {
+    "indicator": [
+      "dfzr10002-final-prompts.txt#1",
+      "dfzr10002-final-prompts.txt#2"
+    ],
+    "datasource": [
+      "dfzr10002-final-prompts.txt#3",
+      "dfzr10002-final-prompts.txt#4"
+    ],
+    "query": [
+      "dfzr10002-final-prompts.txt#5",
+      "dfzr10002-final-prompts.txt#6"
+    ],
+    "experiment": [
+      "dfzr10002-final-prompts.txt#7",
+      "dfzr10002-final-prompts.txt#8"
+    ],
+    "dataset": [
+      "dfzr10002-final-prompts.txt#9",
+      "dfzr10002-final-prompts.txt#10"
+    ],
+    "chart": [
+      "dfzr10002-final-prompts.txt#11",
+      "dfzr10002-final-prompts.txt#12"
+    ],
+    "report": [
+      "dfzr10002-final-prompts.txt#13",
+      "dfzr10002-final-prompts.txt#14"
+    ],
+    "service": [
+      "dfzr10002-final-prompts.txt#15",
+      "dfzr10002-final-prompts.txt#16"
+    ],
+    "dashboard": [
+      "dfzr10002-final-prompts.txt#17",
+      "dfzr10002-final-prompts.txt#18"
+    ],
+    "dimension": [
+      "dfzr10002-final-prompts.txt#19",
+      "dfzr10002-final-prompts.txt#20"
+    ],
+    "filter": [
+      "dfzr10002-final-prompts.txt#21",
+      "dfzr10002-final-prompts.txt#22"
+    ],
+    "schedule": [
+      "dfzr10002-final-prompts.txt#23",
+      "dfzr10002-final-prompts.txt#24"
+    ],
+    "export": [
+      "dfzr10002-final-prompts.txt#25",
+      "dfzr10002-final-prompts.txt#26"
+    ],
+    "cache": [
+      "dfzr10002-final-prompts.txt#27",
+      "dfzr10002-final-prompts.txt#28"
+    ],
+    "model": [
+      "dfzr10002-final-prompts.txt#29",
+      "dfzr10002-final-prompts.txt#30"
+    ],
+    "log": [
+      "dfzr10002-final-prompts.txt#31",
+      "dfzr10002-final-prompts.txt#32"
+    ]
+  },
+  "occupied_topics": {
+    "indicator": [
+      "dfzr10002-final-prompts.txt#1",
+      "dfzr10002-final-prompts.txt#2"
+    ],
+    "datasource": [
+      "dfzr10002-final-prompts.txt#3",
+      "dfzr10002-final-prompts.txt#4"
+    ],
+    "query": [
+      "dfzr10002-final-prompts.txt#5",
+      "dfzr10002-final-prompts.txt#6"
+    ],
+    "experiment": [
+      "dfzr10002-final-prompts.txt#7",
+      "dfzr10002-final-prompts.txt#8"
+    ],
+    "dataset": [
+      "dfzr10002-final-prompts.txt#9",
+      "dfzr10002-final-prompts.txt#10"
+    ],
+    "chart": [
+      "dfzr10002-final-prompts.txt#11",
+      "dfzr10002-final-prompts.txt#12"
+    ],
+    "report": [
+      "dfzr10002-final-prompts.txt#13",
+      "dfzr10002-final-prompts.txt#14"
+    ],
+    "service": [
+      "dfzr10002-final-prompts.txt#15",
+      "dfzr10002-final-prompts.txt#16"
+    ],
+    "dashboard": [
+      "dfzr10002-final-prompts.txt#17",
+      "dfzr10002-final-prompts.txt#18"
+    ],
+    "dimension": [
+      "dfzr10002-final-prompts.txt#19",
+      "dfzr10002-final-prompts.txt#20"
+    ],
+    "filter": [
+      "dfzr10002-final-prompts.txt#21",
+      "dfzr10002-final-prompts.txt#22"
+    ],
+    "schedule": [
+      "dfzr10002-final-prompts.txt#23",
+      "dfzr10002-final-prompts.txt#24"
+    ],
+    "export": [
+      "dfzr10002-final-prompts.txt#25",
+      "dfzr10002-final-prompts.txt#26"
+    ],
+    "cache": [
+      "dfzr10002-final-prompts.txt#27",
+      "dfzr10002-final-prompts.txt#28"
+    ],
+    "model": [
+      "dfzr10002-final-prompts.txt#29",
+      "dfzr10002-final-prompts.txt#30"
+    ],
+    "log": [
+      "dfzr10002-final-prompts.txt#31",
+      "dfzr10002-final-prompts.txt#32"
+    ]
+  },
+  "occupied_topic_modes": {
+    "indicator|状态流转": [
+      "dfzr10002-final-prompts.txt#1"
+    ],
+    "indicator|列表定位与筛选": [
+      "dfzr10002-final-prompts.txt#2"
+    ],
+    "datasource|规则与阈值": [
+      "dfzr10002-final-prompts.txt#3"
+    ],
+    "datasource|边界与空态": [
+      "dfzr10002-final-prompts.txt#4"
+    ],
+    "query|缺陷处置": [
+      "dfzr10002-final-prompts.txt#5"
+    ],
+    "query|持久化与一致性": [
+      "dfzr10002-final-prompts.txt#6"
+    ],
+    "experiment|边界与空态": [
+      "dfzr10002-final-prompts.txt#7"
+    ],
+    "experiment|新增展示视图": [
+      "dfzr10002-final-prompts.txt#8"
+    ],
+    "dataset|批量操作": [
+      "dfzr10002-final-prompts.txt#9"
+    ],
+    "dataset|新增展示视图": [
+      "dfzr10002-final-prompts.txt#10"
+    ],
+    "chart|权限与归属": [
+      "dfzr10002-final-prompts.txt#11"
+    ],
+    "chart|列表定位与筛选": [
+      "dfzr10002-final-prompts.txt#12"
+    ],
+    "report|边界与空态": [
+      "dfzr10002-final-prompts.txt#13"
+    ],
+    "report|代码重构收拢": [
+      "dfzr10002-final-prompts.txt#14"
+    ],
+    "service|导入导出": [
+      "dfzr10002-final-prompts.txt#15"
+    ],
+    "service|持久化与一致性": [
+      "dfzr10002-final-prompts.txt#16"
+    ],
+    "dashboard|权限与归属": [
+      "dfzr10002-final-prompts.txt#17"
+    ],
+    "dashboard|批量操作": [
+      "dfzr10002-final-prompts.txt#18"
+    ],
+    "dimension|导入导出": [
+      "dfzr10002-final-prompts.txt#19"
+    ],
+    "dimension|状态流转": [
+      "dfzr10002-final-prompts.txt#20"
+    ],
+    "filter|批量操作": [
+      "dfzr10002-final-prompts.txt#21"
+    ],
+    "filter|规则与阈值": [
+      "dfzr10002-final-prompts.txt#22"
+    ],
+    "schedule|规则与阈值": [
+      "dfzr10002-final-prompts.txt#23"
+    ],
+    "schedule|持久化与一致性": [
+      "dfzr10002-final-prompts.txt#24"
+    ],
+    "export|缺陷处置": [
+      "dfzr10002-final-prompts.txt#25"
+    ],
+    "export|新增展示视图": [
+      "dfzr10002-final-prompts.txt#26"
+    ],
+    "cache|权限与归属": [
+      "dfzr10002-final-prompts.txt#27"
+    ],
+    "cache|状态流转": [
+      "dfzr10002-final-prompts.txt#28"
+    ],
+    "model|导入导出": [
+      "dfzr10002-final-prompts.txt#29"
+    ],
+    "model|列表定位与筛选": [
+      "dfzr10002-final-prompts.txt#30"
+    ],
+    "log|缺陷处置": [
+      "dfzr10002-final-prompts.txt#31"
+    ],
+    "log|依赖升级与迁移与流程": [
+      "dfzr10002-final-prompts.txt#32"
+    ]
+  },
+  "occupied_modes": {
+    "状态流转": [
+      "dfzr10002-final-prompts.txt#1",
+      "dfzr10002-final-prompts.txt#20",
+      "dfzr10002-final-prompts.txt#28"
+    ],
+    "列表定位与筛选": [
+      "dfzr10002-final-prompts.txt#2",
+      "dfzr10002-final-prompts.txt#12",
+      "dfzr10002-final-prompts.txt#30"
+    ],
+    "规则与阈值": [
+      "dfzr10002-final-prompts.txt#3",
+      "dfzr10002-final-prompts.txt#22",
+      "dfzr10002-final-prompts.txt#23"
+    ],
+    "边界与空态": [
+      "dfzr10002-final-prompts.txt#4",
+      "dfzr10002-final-prompts.txt#7",
+      "dfzr10002-final-prompts.txt#13"
+    ],
+    "缺陷处置": [
+      "dfzr10002-final-prompts.txt#5",
+      "dfzr10002-final-prompts.txt#25",
+      "dfzr10002-final-prompts.txt#31"
+    ],
+    "持久化与一致性": [
+      "dfzr10002-final-prompts.txt#6",
+      "dfzr10002-final-prompts.txt#16",
+      "dfzr10002-final-prompts.txt#24"
+    ],
+    "新增展示视图": [
+      "dfzr10002-final-prompts.txt#8",
+      "dfzr10002-final-prompts.txt#10",
+      "dfzr10002-final-prompts.txt#26"
+    ],
+    "批量操作": [
+      "dfzr10002-final-prompts.txt#9",
+      "dfzr10002-final-prompts.txt#18",
+      "dfzr10002-final-prompts.txt#21"
+    ],
+    "权限与归属": [
+      "dfzr10002-final-prompts.txt#11",
+      "dfzr10002-final-prompts.txt#17",
+      "dfzr10002-final-prompts.txt#27"
+    ],
+    "代码重构收拢": [
+      "dfzr10002-final-prompts.txt#14"
+    ],
+    "导入导出": [
+      "dfzr10002-final-prompts.txt#15",
+      "dfzr10002-final-prompts.txt#19",
+      "dfzr10002-final-prompts.txt#29"
+    ],
+    "依赖升级与迁移与流程": [
+      "dfzr10002-final-prompts.txt#32"
+    ]
+  },
+  "module_counts": {
+    "indicator": 2,
+    "datasource": 2,
+    "query": 2,
+    "experiment": 2,
+    "dataset": 2,
+    "chart": 2,
+    "report": 2,
+    "service": 2,
+    "dashboard": 2,
+    "dimension": 2,
+    "filter": 2,
+    "schedule": 2,
+    "export": 2,
+    "cache": 2,
+    "model": 2,
+    "log": 2
+  },
+  "topic_counts": {
+    "indicator": 2,
+    "datasource": 2,
+    "query": 2,
+    "experiment": 2,
+    "dataset": 2,
+    "chart": 2,
+    "report": 2,
+    "service": 2,
+    "dashboard": 2,
+    "dimension": 2,
+    "filter": 2,
+    "schedule": 2,
+    "export": 2,
+    "cache": 2,
+    "model": 2,
+    "log": 2
+  },
+  "topic_mode_counts": {
+    "indicator|状态流转": 1,
+    "indicator|列表定位与筛选": 1,
+    "datasource|规则与阈值": 1,
+    "datasource|边界与空态": 1,
+    "query|缺陷处置": 1,
+    "query|持久化与一致性": 1,
+    "experiment|边界与空态": 1,
+    "experiment|新增展示视图": 1,
+    "dataset|批量操作": 1,
+    "dataset|新增展示视图": 1,
+    "chart|权限与归属": 1,
+    "chart|列表定位与筛选": 1,
+    "report|边界与空态": 1,
+    "report|代码重构收拢": 1,
+    "service|导入导出": 1,
+    "service|持久化与一致性": 1,
+    "dashboard|权限与归属": 1,
+    "dashboard|批量操作": 1,
+    "dimension|导入导出": 1,
+    "dimension|状态流转": 1,
+    "filter|批量操作": 1,
+    "filter|规则与阈值": 1,
+    "schedule|规则与阈值": 1,
+    "schedule|持久化与一致性": 1,
+    "export|缺陷处置": 1,
+    "export|新增展示视图": 1,
+    "cache|权限与归属": 1,
+    "cache|状态流转": 1,
+    "model|导入导出": 1,
+    "model|列表定位与筛选": 1,
+    "log|缺陷处置": 1,
+    "log|依赖升级与迁移与流程": 1
+  },
+  "mode_counts": {
+    "状态流转": 3,
+    "列表定位与筛选": 3,
+    "规则与阈值": 3,
+    "边界与空态": 3,
+    "缺陷处置": 3,
+    "持久化与一致性": 3,
+    "新增展示视图": 3,
+    "批量操作": 3,
+    "权限与归属": 3,
+    "导入导出": 3,
+    "代码重构收拢": 1,
+    "依赖升级与迁移与流程": 1
+  },
+  "subject_mode_counts": {
+    "indicator|状态流转": 1,
+    "indicator|列表定位与筛选": 1,
+    "datasource|规则与阈值": 1,
+    "datasource|边界与空态": 1,
+    "query|缺陷处置": 1,
+    "query|持久化与一致性": 1,
+    "experiment|边界与空态": 1,
+    "experiment|新增展示视图": 1,
+    "dataset|批量操作": 1,
+    "dataset|新增展示视图": 1,
+    "chart|权限与归属": 1,
+    "chart|列表定位与筛选": 1,
+    "report|边界与空态": 1,
+    "report|代码重构收拢": 1,
+    "service|导入导出": 1,
+    "service|持久化与一致性": 1,
+    "dashboard|权限与归属": 1,
+    "dashboard|批量操作": 1,
+    "dimension|导入导出": 1,
+    "dimension|状态流转": 1,
+    "filter|批量操作": 1,
+    "filter|规则与阈值": 1,
+    "schedule|规则与阈值": 1,
+    "schedule|持久化与一致性": 1,
+    "export|缺陷处置": 1,
+    "export|新增展示视图": 1,
+    "cache|权限与归属": 1,
+    "cache|状态流转": 1,
+    "model|导入导出": 1,
+    "model|列表定位与筛选": 1,
+    "log|缺陷处置": 1,
+    "log|依赖升级与迁移与流程": 1
+  },
+  "task_type_counts": {},
+  "new_capability_ratio": 0.0,
+  "limits": {
+    "max_per_repo": 50,
+    "max_per_subject": 2,
+    "max_per_mode": 3,
+    "max_mode_ratio": 0.2,
+    "max_ngram_ratio": 0.2,
+    "max_new_capability_ratio": 1.0,
+    "min_shared_object_words": 0
+  },
+  "unknown_labels": []
+}
