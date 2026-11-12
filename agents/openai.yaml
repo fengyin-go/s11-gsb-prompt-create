@@ -1,0 +1,4 @@
+interface:
+  display_name: "S11 单轮批量出题"
+  short_description: "S11 容量优先批量出题，单 main 仓库与 s11-feedback-run 交接"
+  default_prompt: "使用 $s11-gsb-prompt-create 真实启动基准仓库，按仓库最高有效容量生成，类型比例仅作建议，GitHub 限流等待重试，创建单 main、origin/workspace 批次，过难度和查重后交接给 s11-feedback-run。"
