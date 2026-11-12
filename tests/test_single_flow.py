@@ -60,7 +60,7 @@ class SingleFlow(unittest.TestCase):
             "startup_commit": self.commit, "baseline_commit": self.commit,
             "startup_command": "python3 -c 'from src.orders import orders; orders()'",
             "startup_evidence": "local fixture entry succeeds"})
-        create.save_json(self.root / "_config/settings.json", {"image_id": "sha256:" + "a" * 64, "github_owner": "selftest",
+        create.save_json(self.root / "_config/settings.json", {"image_id": "sha256:" + "a" * 64, "github_owner": "fengyin-go",
             "git_user_name": "Selftest", "git_user_email": "selftest@example.com"})
         self.original_clone = create.hub.clone_branch
 
@@ -94,7 +94,7 @@ class SingleFlow(unittest.TestCase):
 
     def build(self, dry=False):
         return create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
-                      preflight=self.parent / "startup-preflight.json", owner="selftest", dry_run=dry)
+                      preflight=self.parent / "startup-preflight.json", owner="fengyin-go", dry_run=dry)
 
     def test_dry_run_no_files_or_remote_mutations(self):
         self.wire_git()
@@ -104,7 +104,7 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(set(self.parent.rglob("*")), before)
         self.assertFalse(self.remote_repos)
         self.assertEqual(result["branches"], ["main"])
-        self.assertEqual(result["tasks"][0]["repo"], "selftest/cc10003-01-development")
+        self.assertEqual(result["tasks"][0]["repo"], "fengyin-go/cc10003-01-development")
         self.assertEqual(result["tasks"][0]["folder"], "cc10003-01-development")
         self.assertEqual(result["tasks"][0]["task_id"], "cc10003-01-development")
 
@@ -113,11 +113,11 @@ class SingleFlow(unittest.TestCase):
         create.save_json(self.parent / "repo-topic-map.json", self.topic)
         self.wire_git()
         result = create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
-            preflight=self.parent / "startup-preflight.json", owner="selftest", start_index=123)
+            preflight=self.parent / "startup-preflight.json", owner="fengyin-go", start_index=123)
         entry = result["tasks"][0]
         self.assertEqual(entry["folder"], "cc10003-01-bugfix")
         self.assertEqual(entry["task_id"], entry["folder"])
-        self.assertEqual(entry["repo"], "selftest/" + entry["folder"])
+        self.assertEqual(entry["repo"], "fengyin-go/" + entry["folder"])
         task = self.parent / entry["folder"]
         self.assertTrue((task / "origin/.git").is_dir())
         self.assertEqual(workbook.parse_folder_name(task.name, self.parent)["number"], "123")
@@ -125,7 +125,7 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(row["子文件夹名称"], task.name)
         self.assertEqual(row["编号"], "123")
         self.assertTrue(create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
-                owner="selftest", start_index=123, verify=True)["ok"])
+                owner="fengyin-go", start_index=123, verify=True)["ok"])
 
     def test_resume_legacy_batch_retains_frozen_ids(self):
         self.wire_git()
@@ -147,7 +147,7 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(row["编号"], "1")
         with self.assertRaisesRegex(ValueError, "start-index"):
             create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
-                preflight=self.parent / "startup-preflight.json", owner="selftest", start_index=2)
+                preflight=self.parent / "startup-preflight.json", owner="fengyin-go", start_index=2)
 
     def test_repository_name_includes_source_sequence_and_type_slug(self):
         self.assertEqual(create.source_repo_name("https://github.com/acme/cc10001.git"), "cc10001")
