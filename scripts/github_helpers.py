@@ -11,6 +11,7 @@ from pathlib import Path
 BASE_BRANCH_NAME = "main"
 REQUIRED_REMOTE_BRANCHES = {"main"}
 COMMON_GH_PATHS = ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
+FORBIDDEN_ACTIVE_GITHUB_ACCOUNTS = {"fengyin-solo"}
 
 def run_cmd(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, cwd=str(cwd) if cwd else None, capture_output=True, text=True)
@@ -55,6 +56,37 @@ def run_gh(args: list[str]) -> subprocess.CompletedProcess[str]:
             time.sleep(step)
             remaining -= step
         attempt += 1
+
+
+def active_github_account() -> str:
+    """Return the account behind the currently effective gh token."""
+    result = run_gh(["api", "user", "--jq", ".login"])
+    account = result.stdout.strip()
+    if result.returncode != 0 or not account:
+        message = result.stderr.strip() or result.stdout.strip() or "gh api user returned no login"
+        raise RuntimeError(f"无法确认本机当前活跃 GitHub 账号：{message}")
+    if account.lower() in FORBIDDEN_ACTIVE_GITHUB_ACCOUNTS:
+        raise ValueError(
+            f"当前活跃 GitHub 账号为 {account}，禁止开始任务；"
+            "请立即停止并切换到允许的账号后再重试"
+        )
+    return account
+
+
+def default_github_owner() -> str:
+    """Backward-compatible alias for the active gh account."""
+    return active_github_account()
+
+
+def resolve_repository_owner(requested_owner: str | None = None) -> str:
+    """Use the active gh account; an explicit owner may only confirm that account."""
+    active_owner = active_github_account()
+    requested = str(requested_owner or "").strip()
+    if requested and requested != active_owner:
+        raise ValueError(
+            f"目标 owner={requested} 与本机当前活跃 GitHub 账号 {active_owner} 不一致"
+        )
+    return active_owner
 
 
 def github_token_args(remote_url: str) -> list[str]:

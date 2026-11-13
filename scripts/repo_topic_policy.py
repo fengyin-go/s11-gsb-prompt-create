@@ -100,6 +100,12 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
         allowed_families = raw.get("allowed_families") or []
         if not isinstance(allowed_families, list):
             raise TopicMapError(f"{where} 的 allowed_families 必须是数组")
+        domain_objects = raw.get("domain_objects") or []
+        domain_results = raw.get("domain_results") or []
+        if not isinstance(domain_objects, list):
+            raise TopicMapError(f"{where} 的 domain_objects 必须是数组")
+        if not isinstance(domain_results, list):
+            raise TopicMapError(f"{where} 的 domain_results 必须是数组")
         topics.append(
             {
                 "id": topic_id,
@@ -107,6 +113,8 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
                 "module": str(raw.get("module") or "").strip(),
                 "keywords": sorted(set(keywords), key=keywords.index),
                 "evidence": evidence,
+                "domain_objects": [str(value).strip() for value in domain_objects if str(value).strip()],
+                "domain_results": [str(value).strip() for value in domain_results if str(value).strip()],
                 "seat_capacity": seat_capacity,
                 "allowed_families": [str(value).strip() for value in allowed_families if str(value).strip()],
                 "notes": str(raw.get("notes") or "").strip(),
@@ -147,6 +155,9 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
         if topic not in topic_ids:
             raise TopicMapError(f"{where} 引用了不存在的 topic：{topic}")
         family = str(raw.get("family") or "").strip()
+        domain_fit = raw.get("domain_fit")
+        if domain_fit is not None and not isinstance(domain_fit, dict):
+            raise TopicMapError(f"{where} 的 domain_fit 必须是对象")
         task_plan.append(
             {
                 "sequence": sequence,
@@ -155,6 +166,7 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
                 "topic": topic,
                 "family": family,
                 "angle": str(raw.get("angle") or "").strip(),
+                "domain_fit": dict(domain_fit) if isinstance(domain_fit, dict) else None,
             }
         )
     task_plan.sort(key=lambda item: int(item["sequence"]))
@@ -164,6 +176,8 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
         "profile": profile,
         "type_policy": str(payload.get("type_policy") or "capacity-first"),
         "repo": str(payload.get("repo") or "").strip(),
+        "domain": str(payload.get("domain") or "").strip(),
+        "subdirection": str(payload.get("subdirection") or "").strip(),
         "base_commit": str(payload.get("base_commit") or "").strip(),
         "max_capacity": max_capacity,
         "topics": topics,

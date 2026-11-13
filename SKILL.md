@@ -5,7 +5,7 @@ description: "solo11 单轮 pointwise 批量出题：真实启动基准仓库并
 
 # S11 批量出题
 
-本机数据仓库只允许发布到 GitHub 账号 `fengyin-go`。建仓和推送前核对目标 owner 与凭据实际账号；禁止使用 `fengyin-solo` 或自动回退到其他账号。旧交付链接与历史证据保持原样，迁移既有仓库需另行明确处理。
+数据仓库发布身份以当前电脑 `gh` 实际生效令牌为准，用 `gh api user` 读取活跃账号；不同电脑不要求固定账号，`_config/settings.json` 的 `github_owner` 不再决定建仓 owner。显式传入的 owner 只能与当前活跃账号一致。活跃账号为 `fengyin-solo` 时必须立即停止任务并提示切换账号，不能尝试其他账号回退。旧交付链接与历史证据保持原样，迁移既有仓库需另行明确处理。
 
 从 `gsb-prompt-create` 复制的单次运行版本。先真实启动原始仓库、冻结依赖基线，再按业务 topic 排题位、建仓、生成首轮提示词，最后输出 `s11-feedback-run` 可直接读取的批次。不投递 Trae、不运行模型、不生成 Feedback。
 
@@ -61,14 +61,14 @@ GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositorie
 
 ## 2. 排题位、建仓
 
-先读 [references/domain-fit.md](references/domain-fit.md)，按题目的主要工作及领域数据结果核验领域准入；再读 [references/semantic-v2-topic-map.md](references/semantic-v2-topic-map.md)，按真实源码和页面建立 `repo-topic-map.json`，`profile` 保留 `gsb-semantic-v2`。`task_plan` 使用上表五个 slug 与任务类型，逐项包含 sequence、topic、family、angle。类型比例不阻塞容量优先计划，同 topic 的多题跨家族并受 seat_capacity 限制。
+先读 [references/domain-fit.md](references/domain-fit.md)，按题目的主要工作及领域数据结果核验领域准入；再读 [references/semantic-v2-topic-map.md](references/semantic-v2-topic-map.md)，按真实源码和页面建立 `repo-topic-map.json`，`profile` 保留 `gsb-semantic-v2`。topic map 必须写明 `domain`、`subdirection`；每个 topic 写明 `domain_objects`、`domain_results`，每个 `task_plan` 题位写明 `domain_fit` 的主任务、领域结果、真实源码依据和 pass 结论。`task_plan` 使用上表五个 slug 与任务类型，逐项包含 sequence、topic、family、angle。类型比例不阻塞容量优先计划，同 topic 的多题跨家族并受 seat_capacity 限制。
 
 每个题位先确认领域适配再计入容量、创建仓库。所属仓库是数据工程项目、topic 名叫血缘或圈选，都不能证明题目主体属于数据工程；通用前端升级、构建、路由或部署不得靠借用两个业务页面取得领域资格。迁移题缺少真实领域目标时换成有源码依据的合格题位，不为配比凑迁移题。
 
 容量沿用语义题位、主体/模式护栏和单仓上限 50、每模式 3；源码派生有 warning 就先修扫描，不猜容量。新主体仅功能开发可用，并遵守原来的限流、跨域和台账规则。扩容只向最大 sequence 后追加；旧序号、类型、topic、family、angle 和仓库保持原样，追加默认保持容量优先；只有显式 strict-ratio 才核对整体比例。不要重排历史题。
 
 ```bash
-python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map.json --expected-base-commit <SHA>
+python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map.json --repo <源仓库> --expected-base-commit <SHA> --require-domain-fit
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123 --dry-run
 # 核对演练清单后，去掉 --dry-run 创建并发布初始仓库
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123
@@ -89,7 +89,7 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 1. 确认当前 SHA 的启动预检、依赖复制与无安装 smoke 已通过。
 2. 同步平台历史语料，检查全局注册表，扫本批及历史近邻。默认共享原 GSB 全局注册表，保留跨批次防撞；允许用 `GSB_CROSS_PROJECT_REGISTRY` 显式指定。没有历史时只能按引用规则记录一次 bootstrap。
 3. 先生成台账与题位表。逐题读取自己的 origin 源码，避开依赖目录。缺陷必须真实复现，不猜现象或结果。台账中记录领域准入结论、主要工作、受影响的数据对象/链路、源码依据和领域验收结果；领域不符或证据不足的候选先换切入点，不进入写表。
-4. 写表只调用本地 `batch_prompt_workbook.py update`；它在写入前执行 G16/G19 和原三道闸、跨项目闸。禁止 `--allow-gate-failure`。`tasks.xlsx` 固定原八列，题型严格使用上表名称。
+4. 写表只调用本地 `batch_prompt_workbook.py update`；它在写入前执行领域题位契约、G16/G19 和原三道闸、跨项目闸。领域闸要求最终题面命中计划 topic，并同时出现该题位的领域对象和可观察领域结果；只在标题或末尾补业务名词不放行。禁止 `--allow-gate-failure`。`tasks.xlsx` 固定原八列，题型严格使用上表名称。
 5. 完成后全量复检领域准入与题面副本；交接前再次核对最终题面和 requirements 的主体一致。G16/G19、主题及查重通过不能替代领域准入。strict 命中逐条重写或按原规则有证据地复核；已确认负向硬闸不能备注放行。
 
 ```bash
@@ -106,7 +106,7 @@ python3 <skill>/scripts/check_cross_project_prompts.py --batch-dir <batch目录>
 
 ## 4. 交接给运行侧
 
-复核每题的领域准入证据后，读 [references/handoff-schema.md](references/handoff-schema.md)，准备真实的领域/语言元数据、逐项 requirements 和可执行录屏方案。`_config/settings.json` 中镜像摘要必须来自本机真实预检，不猜另一架构的值。原 `cc-domain-task-create` 不是本批必经入口。同一基础仓库、基线和镜像的所属领域、子方向、语言/框架、Harness、Harness 版本、操作系统及环境可复现等级仅在 metadata.common 核实一次，交接生成公共档案供其余题和后续同身份批次复用，不逐题重新生成。公共领域字段只说明项目背景，不能免除每个题面与该领域是否相符的语义核验；不相符时更换题位，不靠改领域字段、挪账号或追加业务名词放行。
+复核每题的领域准入证据后，读 [references/handoff-schema.md](references/handoff-schema.md)，准备真实的领域/语言元数据、逐项 requirements 和可执行录屏方案。`_config/settings.json` 中镜像摘要必须来自本机真实预检，不猜另一架构的值。原 `cc-domain-task-create` 不是本批必经入口。同一基础仓库、基线和镜像的所属领域、子方向、语言/框架、Harness、Harness 版本、操作系统及环境可复现等级仅在 metadata.common 核实一次，交接生成公共档案供其余题和后续同身份批次复用，不逐题重新生成。`metadata.common` 的领域和子方向必须与 topic map 一致；交接会把该题位的 `domain_contract` 冻结进 `task.json`，运行侧按 hash 校验。公共领域字段不能免除逐题语义核验；不相符时更换题位，不靠改领域字段、挪账号或追加业务名词放行。
 
 ```bash
 python3 <skill>/scripts/prepare_handoff.py --root <root> --batch b1111-01 --metadata <batch目录>/handoff-metadata.json

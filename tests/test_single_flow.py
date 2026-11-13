@@ -50,17 +50,21 @@ class SingleFlow(unittest.TestCase):
         sh(self.source, "remote", "add", "origin", str(self.source_bare))
         self.remote_repos = {}
         self.topic = {"version": 1, "profile": "gsb-semantic-v2", "base_commit": self.commit,
+                      "domain": "测试领域", "subdirection": "测试方向",
                       "max_capacity": 1, "topics": [{"id": "orders", "name": "订单", "module": "orders",
-                        "keywords": ["订单", "订单项"], "evidence": ["src/orders.py"], "seat_capacity": 1}],
+                        "keywords": ["订单", "订单项"], "evidence": ["src/orders.py"],
+                        "domain_objects": ["订单"], "domain_results": ["导出"], "seat_capacity": 1}],
                       "task_plan": [{"sequence": 1, "slug": "development", "task_type": "功能开发",
-                                     "topic": "orders", "family": "新增能力", "angle": "订单导出"}]}
+                                     "topic": "orders", "family": "新增能力", "angle": "订单导出",
+                                     "domain_fit": {"main_task": "新增订单导出", "business_result": "导出订单",
+                                                    "source_evidence": ["src/orders.py"], "conclusion": "pass"}}]}
         create.save_json(self.parent / "repo-topic-map.json", self.topic)
         create.save_json(self.parent / "startup-preflight.json", {"startup_ok": True, "cleaned_up": True,
             "baseline_push_ok": True, "dependency_ignored": True, "dependency_paths": [],
             "startup_commit": self.commit, "baseline_commit": self.commit,
             "startup_command": "python3 -c 'from src.orders import orders; orders()'",
             "startup_evidence": "local fixture entry succeeds"})
-        create.save_json(self.root / "_config/settings.json", {"image_id": "sha256:" + "a" * 64, "github_owner": "fengyin-go",
+        create.save_json(self.root / "_config/settings.json", {"image_id": "sha256:" + "a" * 64,
             "git_user_name": "Selftest", "git_user_email": "selftest@example.com"})
         self.original_clone = create.hub.clone_branch
 
@@ -83,7 +87,8 @@ class SingleFlow(unittest.TestCase):
         sh(dest, "remote", "set-url", "origin", url)
 
     def wire_git(self):
-        patches = [patch.object(create.hub, "repo_exists", return_value=False),
+        patches = [patch.object(create.hub, "active_github_account", return_value="selftest"),
+                   patch.object(create.hub, "repo_exists", return_value=False),
                    patch.object(create.hub, "create_repo", side_effect=self.fake_repo_create),
                    patch.object(create.hub, "push_commit_to_branch", side_effect=self.fake_push),
                    patch.object(create.hub, "remote_heads", side_effect=self.fake_heads),
@@ -94,7 +99,7 @@ class SingleFlow(unittest.TestCase):
 
     def build(self, dry=False):
         return create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
-                      preflight=self.parent / "startup-preflight.json", owner="fengyin-go", dry_run=dry)
+                      preflight=self.parent / "startup-preflight.json", owner="selftest", dry_run=dry)
 
     def test_dry_run_no_files_or_remote_mutations(self):
         self.wire_git()
@@ -104,7 +109,7 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(set(self.parent.rglob("*")), before)
         self.assertFalse(self.remote_repos)
         self.assertEqual(result["branches"], ["main"])
-        self.assertEqual(result["tasks"][0]["repo"], "fengyin-go/cc10003-01-development")
+        self.assertEqual(result["tasks"][0]["repo"], "selftest/cc10003-01-development")
         self.assertEqual(result["tasks"][0]["folder"], "cc10003-01-development")
         self.assertEqual(result["tasks"][0]["task_id"], "cc10003-01-development")
 
@@ -113,11 +118,11 @@ class SingleFlow(unittest.TestCase):
         create.save_json(self.parent / "repo-topic-map.json", self.topic)
         self.wire_git()
         result = create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
-            preflight=self.parent / "startup-preflight.json", owner="fengyin-go", start_index=123)
+            preflight=self.parent / "startup-preflight.json", owner="selftest", start_index=123)
         entry = result["tasks"][0]
         self.assertEqual(entry["folder"], "cc10003-01-bugfix")
         self.assertEqual(entry["task_id"], entry["folder"])
-        self.assertEqual(entry["repo"], "fengyin-go/" + entry["folder"])
+        self.assertEqual(entry["repo"], "selftest/" + entry["folder"])
         task = self.parent / entry["folder"]
         self.assertTrue((task / "origin/.git").is_dir())
         self.assertEqual(workbook.parse_folder_name(task.name, self.parent)["number"], "123")
@@ -125,7 +130,7 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(row["子文件夹名称"], task.name)
         self.assertEqual(row["编号"], "123")
         self.assertTrue(create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
-                owner="fengyin-go", start_index=123, verify=True)["ok"])
+                owner="selftest", start_index=123, verify=True)["ok"])
 
     def test_resume_legacy_batch_retains_frozen_ids(self):
         self.wire_git()
@@ -147,7 +152,7 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(row["编号"], "1")
         with self.assertRaisesRegex(ValueError, "start-index"):
             create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
-                preflight=self.parent / "startup-preflight.json", owner="fengyin-go", start_index=2)
+                preflight=self.parent / "startup-preflight.json", owner="selftest", start_index=2)
 
     def test_repository_name_includes_source_sequence_and_type_slug(self):
         self.assertEqual(create.source_repo_name("https://github.com/acme/cc10001.git"), "cc10001")
@@ -159,6 +164,25 @@ class SingleFlow(unittest.TestCase):
             create.task_repo_name("cc10001", 1, "unknown")
         with self.assertRaisesRegex(ValueError, "01..99"):
             create.task_repo_name("cc10001", 100, "bugfix")
+
+    def test_repository_owner_follows_active_account_and_rejects_fengyin_solo(self):
+        with patch.object(create.hub, "active_github_account", return_value="daofaziran888"):
+            self.assertEqual(create.hub.resolve_repository_owner(), "daofaziran888")
+            self.assertEqual(
+                create.hub.resolve_repository_owner("daofaziran888"),
+                "daofaziran888",
+            )
+            with self.assertRaisesRegex(ValueError, "不一致"):
+                create.hub.resolve_repository_owner("fengyin-go")
+        with patch.object(
+            create.hub,
+            "run_gh",
+            return_value=subprocess.CompletedProcess(
+                ["gh", "api", "user"], 0, "fengyin-solo\n", ""
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "立即停止"):
+                create.hub.resolve_repository_owner()
 
     def test_real_clones_handoff_and_main_advance(self):
         self.topic["task_plan"][0].update(task_type="功能优化", slug="optimization")
@@ -180,7 +204,8 @@ class SingleFlow(unittest.TestCase):
                        "dependency_smoke": {"ok": True, "commit": self.commit, "command": "make test",
                                             "evidence": "fixture log", "cleaned_up": True}}}}
         create.save_json(self.parent / "handoff-metadata.json", metadata)
-        with patch.object(handoff, "validate_generation"):
+        with patch.object(handoff, "validate_generation"), \
+                patch.object(handoff.hub, "active_github_account", return_value="selftest"):
             out = handoff.prepare(self.root, "b1111-01", self.parent / "handoff-metadata.json")
         self.assertTrue(out["ok"])
         lib = handoff.runner_lib()

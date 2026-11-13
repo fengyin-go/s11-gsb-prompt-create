@@ -31,8 +31,8 @@
 {
   "common": {
     "repo_id": "本批源仓库的稳定标识",
-    "domain": "实际领域",
-    "subdirection": "实际子方向",
+    "domain": "必须与 repo-topic-map.json 的 domain 一致",
+    "subdirection": "必须与 repo-topic-map.json 的 subdirection 一致",
     "language": "Python",
     "frameworks": "实际语言与框架版本",
     "repro_level": "已容器化，可一键起环境"
@@ -65,7 +65,7 @@
 
 同一批的代表性 smoke 可引用同份证据，但该证据须涵盖本批技术栈、依赖来源和运行环境，不能只写 true。容器架构与宿主不同或依赖含 native 组件时，实际运行环境必须另验证，不能从宿主启动成功推断容器成功。
 
-`prepare_handoff.py` 不执行参考解、不调用模型。它从 tasks.xlsx 原样取题面，从仓库清单取 GitHub 地址和初始提交，写 V2 交接；输出使用 `producer=s11-gsb-prompt-create`、`execution_mode=single`、`branch=main`，并把这三个标记及 origin/workspace 路径纳入 hash 和批次清单。运行侧会拒绝 A/B 目录、错误分支、错误路径和输入漂移。
+`prepare_handoff.py` 不执行参考解、不调用模型。它从 tasks.xlsx 原样取题面，从仓库清单取 GitHub 地址和初始提交，并再次运行领域题位闸。输出使用 `producer=s11-gsb-prompt-create`、`execution_mode=single`、`branch=main`，把每个题位的 `domain_contract`（domain、subdirection、topic、主任务、领域结果、源码依据、pass 结论）冻结进 `task.json`，同时把 producer/execution_mode/branch、origin/workspace 路径和领域契约纳入 hash 与批次清单。运行侧会拒绝 A/B 目录、错误分支、错误路径、领域契约不一致和输入漂移。
 
 origin 始终保留初始提交与依赖，workspace 只克隆已提交的源码，起跑时没有缓存或被忽略文件。初始地址固定 `/commit/<SHA>`；产物后续推到 main，不增设其他分支。
 

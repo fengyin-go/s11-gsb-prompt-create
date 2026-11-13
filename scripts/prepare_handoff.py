@@ -9,8 +9,10 @@ import sys
 from pathlib import Path
 
 import batch_prompt_workbook as workbook
+import domain_fit
 from create_batch_tasks import MANIFEST, git, read_json, save_json, verify_task
 import github_helpers as hub
+from repo_topic_policy import load_topic_map
 from s11_policy import TYPE_WEIGHTS, validate_type_counts
 
 
@@ -31,6 +33,10 @@ def validate_generation(parent, rows, origin):
         raise ValueError("整批 G16/G19 难度闸门未通过")
     topic_map = load_topic_map(parent=parent, repo=origin, required=True,
                                expected_base_commit=git(origin, "rev-parse", "HEAD"))
+    domain_errors = domain_fit.map_errors(topic_map, origin)
+    domain_errors += domain_fit.prompt_errors(rows, topic_map)
+    if domain_errors:
+        raise ValueError("领域相关性闸门未通过：" + "；".join(domain_errors))
     gates = workbook.run_write_gates(parent, rows, repo=origin, topic_map=topic_map, max_per_mode=3)
     if not gates["ok"]:
         raise ValueError(f"整批主题/难度/去重闸门未通过: {gates}")
@@ -45,6 +51,7 @@ def validate_generation(parent, rows, origin):
 def prepare(root, batch, metadata_file):
     lib = runner_lib()
     root = lib.find_root(str(root))
+    hub.active_github_account()
     if not lib.BATCH_ID_RE.fullmatch(batch):
         raise ValueError("batch 必须为 bMMDD-NN")
     parent = root / "batches" / batch
@@ -52,15 +59,16 @@ def prepare(root, batch, metadata_file):
     meta = read_json(metadata_file)
     manifest = read_json(parent / MANIFEST)
     entries = manifest["tasks"]
+    if not entries:
+        raise ValueError("空批次不能交接")
     rows = workbook.read_workbook(parent / "tasks.xlsx")
     by_name = {row["子文件夹名称"]: row for row in rows}
     if len(by_name) != len(rows) or set(by_name) != {e["task_id"] for e in entries}:
         raise ValueError("tasks.xlsx 与仓库清单任务缺失、重复或不一致")
     counts = {name: sum(r["任务类型"] == name for r in rows) for name in TYPE_WEIGHTS}
-    topic_policy = read_json(parent / "repo-topic-map.json").get("type_policy", "capacity-first")
+    topic_map = load_topic_map(parent=parent, repo=parent / entries[0]["task_id"] / "origin", required=True)
+    topic_policy = topic_map.get("type_policy", "capacity-first")
     validate_type_counts(counts, len(rows), policy=topic_policy)
-    if not entries:
-        raise ValueError("空批次不能交接")
     validate_generation(parent, rows, parent / entries[0]["task_id"] / "origin")
     import sys
     runtime_scripts = Path(__file__).resolve().parents[2]/'s11-feedback-run/scripts'
@@ -80,6 +88,8 @@ def prepare(root, batch, metadata_file):
         {'source_repo':manifest.get('source_repo') or common.get('repo_id'), 'initial_commit':entries[0]['initial_commit'],'image_id':cfg['image_id']},
         common_values, {'metadata':str(Path(metadata_file).resolve()),'sha256':__import__('hashlib').sha256(Path(metadata_file).read_bytes()).hexdigest()})
     common.update(shared_profile['fields'])
+    if common.get("domain") != topic_map.get("domain") or common.get("subdirection") != topic_map.get("subdirection"):
+        raise ValueError("handoff metadata 的 domain/subdirection 必须与 repo-topic-map.json 一致")
     tasks, baselines, staged = [], {}, []
     for entry in entries:
         name = entry["task_id"]
@@ -114,12 +124,15 @@ def prepare(root, batch, metadata_file):
         if not cfg.get("image_id"):
             raise ValueError("settings 缺少本机架构镜像 image_id；先真实预检，不填猜测值")
         initial = entry["initial_commit"]
+        plan_sequence = int(entry["sequence"])
+        domain_contract = domain_fit.contract_for_sequence(topic_map, plan_sequence)
         record = {k: data[k] for k in ("repo_id", "domain", "subdirection", "language", "frameworks", "repro_level", "requirements")}
         record.update(common_profile={"path":str(profile_path.relative_to(root)),"sha256":__import__("hashlib").sha256(profile_path.read_bytes()).hexdigest()}, task_id=name, batch=batch, task_type=entry["task_type"], prompt=prompt,
                       difficulty=data.get("difficulty", "困难"), initial_commit=initial, base_commit=initial,
                       task_repo=entry["repo"].split("/", 1)[1], task_repo_full=entry["repo"],
                       handoff_version=2, producer="s11-gsb-prompt-create", execution_mode="single",
-                      branch="main", origin=f"{name}/origin", workspace=f"{name}/workspace")
+                      branch="main", origin=f"{name}/origin", workspace=f"{name}/workspace",
+                      domain_contract=domain_contract, domain_gate_version=1)
         for key in ("image", "image_id", "harness", "harness_version", "os"):
             record[key] = cfg[key]
         baseline = {k: record[k] for k in ("repo_id", "domain", "subdirection", "language", "frameworks", "repro_level",

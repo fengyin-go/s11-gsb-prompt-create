@@ -15,6 +15,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from repo_topic_policy import TopicMapError, load_topic_map, topic_slots
 from s11_policy import validate_plan
+import domain_fit
 
 
 def main() -> None:
@@ -23,6 +24,7 @@ def main() -> None:
     parser.add_argument("--parent", help="项目父目录")
     parser.add_argument("--repo", help="原始仓库目录")
     parser.add_argument("--expected-base-commit", default="", help="要求 topic map 匹配的基准提交")
+    parser.add_argument("--require-domain-fit", action="store_true", help="核对领域题位、源码依据和领域结果")
     args = parser.parse_args()
 
     try:
@@ -34,6 +36,13 @@ def main() -> None:
             expected_base_commit=args.expected_base_commit.strip(),
         )
         validate_plan(topic_map)
+        if args.require_domain_fit:
+            errors = domain_fit.map_errors(
+                topic_map,
+                Path(args.repo).expanduser().resolve() if args.repo else None,
+            )
+            if errors:
+                raise TopicMapError("；".join(errors))
     except (TopicMapError, ValueError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         raise SystemExit(1) from None
@@ -43,6 +52,8 @@ def main() -> None:
         "ok": True,
         "source": topic_map.get("source"),
         "profile": topic_map.get("profile"),
+        "domain": topic_map.get("domain"),
+        "subdirection": topic_map.get("subdirection"),
         "version": topic_map.get("version"),
         "base_commit": topic_map.get("base_commit"),
         "max_capacity": topic_map.get("max_capacity"),

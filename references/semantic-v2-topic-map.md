@@ -6,6 +6,8 @@
 {
   "version": 1,
   "profile": "gsb-semantic-v2",
+  "domain": "数据工程",
+  "subdirection": "数仓与数据湖",
   "base_commit": "最终已推送的40位SHA",
   "max_capacity": 20,
   "topics": [
@@ -15,6 +17,8 @@
       "module": "订单处理",
       "keywords": ["订单", "订单项"],
       "evidence": ["src/orders.py"],
+      "domain_objects": ["订单", "订单项"],
+      "domain_results": ["导出文件", "字段完整"],
       "seat_capacity": 2,
       "allowed_families": ["新增能力", "缺陷修复"]
     }
@@ -26,13 +30,21 @@
       "task_type": "功能开发",
       "topic": "orders",
       "family": "新增能力",
-      "angle": "基于真实代码选择的独特切入点"
+      "angle": "基于真实代码选择的独特切入点",
+      "domain_fit": {
+        "main_task": "新增订单数据集导出",
+        "business_result": "导出文件包含完整订单字段",
+        "source_evidence": ["src/orders.py", "src/exports.py"],
+        "conclusion": "pass"
+      }
     }
   ]
 }
 ```
 
-示例只展示字段，不是可直接建 20 题的完整计划；topic 座位与 task_plan 必须按实际容量补齐。slug/type 使用 SKILL.md 五类一一对应。sequence 为正整数且唯一，可保留撤题空号；目录和仓库同名，均为 `<原仓库名>-<sequence两位数>-<slug>`；工作簿编号 = start-index + sequence - 1。每条 family/angle 必填，同 topic 不重复 family，family 必须在 allowed_families 内（未指定 allowed_families 时不限）。每 topic seat_capacity 为 1..3，单仓默认上限 50，每模式默认 3。任务条数不得超过容量与 max_capacity。
+示例只展示字段，不是可直接建 20 题的完整计划；topic 座位与 task_plan 必须按实际容量补齐。`domain`、`subdirection`、每个 topic 的 `domain_objects`/`domain_results`、每个题位的 `domain_fit` 都是建仓、写表和交接的硬输入。`domain_fit.source_evidence` 必须指向基准提交里真实存在的源码或页面依据，不能用仓库标题、README 口号或计划以后才实现的文件。slug/type 使用 SKILL.md 五类一一对应。sequence 为正整数且唯一，可保留撤题空号；目录和仓库同名，均为 `<原仓库名>-<sequence两位数>-<slug>`；工作簿编号 = start-index + sequence - 1。每条 family/angle 必填，同 topic 不重复 family，family 必须在 allowed_families 内（未指定 allowed_families 时不限）。每 topic seat_capacity 为 1..3，单仓默认上限 50，每模式默认 3。任务条数不得超过容量与 max_capacity。
+
+最终题面必须同时满足三项：仍命中 `task_plan.topic` 的关键词；出现该 topic 的至少一个 `domain_objects`；出现至少一个 `domain_results`。脚本会拦缺少这些信号的候选，但“出现了词”仍不等于领域主任务成立，写表和交接前继续按 [domain-fit.md](domain-fit.md) 人工判断主诉求、数据链路和验收结果。
 
 类型策略 `type_policy` 默认 `capacity-first`：30/30/30/5/5 只是建议，不因配比缩减最高有效容量。只有用户明确指定固定比例才设 `strict-ratio` 并由 s11_policy.allocate_counts 校验。validate_topic_map.py 始终校验 schema、合法类型、topic 席位与基准 SHA。扩容保留旧条目的 sequence、type、topic、family、angle、任务号与仓库，只向末尾追加。
 

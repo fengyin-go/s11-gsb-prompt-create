@@ -483,6 +483,7 @@ def run_write_gates(
     from check_prompt_dedup import check as dedup_check
     from check_prompt_difficulty import JUSTIFICATION_PREFIX
     from check_prompt_difficulty import check as difficulty_check
+    import domain_fit
     from check_repo_theme import (
         DEFAULT_MAX_PER_MODE,
         GATE_VERSION,
@@ -527,6 +528,9 @@ def run_write_gates(
     derived = derive_repo_modules(repo) if repo else {}
     if topic_map is None:
         topic_map = load_topic_map(repo=repo, parent=parent)
+    domain_errors = domain_fit.map_errors(topic_map, repo) if topic_map else []
+    if topic_map:
+        domain_errors += domain_fit.prompt_errors(records, topic_map)
     base_ledger = merge_ledgers(
         load_ledger(parent / LEDGER_FILENAME),
         load_ledger(repo_ledger_path(repo)) if repo else {},
@@ -574,6 +578,7 @@ def run_write_gates(
     dedup = dedup_check(items, 0.2)
 
     problems: list[str] = []
+    problems += [f"领域相关性未通过：{error}" for error in domain_errors]
     pending_rows = sum(1 for record in records if not str(record.get("提示词") or "").strip())
     deferred_batch_ratios = {
         "新增能力类占比超额",
@@ -626,6 +631,7 @@ def run_write_gates(
         "ok": not problems,
         "gate_version": GATE_VERSION,
         "problems": problems,
+        "domain": {"ok": not domain_errors, "problems": domain_errors},
         "theme": {
             "ok": theme.get("ok"),
             "topic_policy": theme.get("topic_policy"),

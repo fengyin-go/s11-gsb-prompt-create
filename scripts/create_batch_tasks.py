@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import batch_prompt_workbook as workbook
+import domain_fit
 import github_helpers as hub
 from check_repo_theme import compute_capacity, derive_repo_modules, derivation_health
 from repo_topic_policy import load_topic_map
@@ -135,12 +136,13 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
     if not 1 <= start_index <= 999999:
         raise ValueError("start-index 必须在 1..999999")
     remote = hub.source_remote_url(source)
-    owner = owner or "fengyin-go"
-    if owner != "fengyin-go":
-        raise ValueError("数据仓库只允许创建在 fengyin-go 名下")
+    owner = hub.resolve_repository_owner(owner)
     base_repo_name = source_repo_name(remote)
     topic_map = load_topic_map(repo=source, parent=parent, explicit=topic_path,
                               required=True, expected_base_commit=commit)
+    domain_errors = domain_fit.map_errors(topic_map, source)
+    if domain_errors:
+        raise ValueError("领域题位契约未通过：" + "；".join(domain_errors))
     if topic_map.get("base_commit") != commit:
         raise ValueError("topic map 必须明确绑定最终基准提交")
     counts = validate_plan(topic_map)
