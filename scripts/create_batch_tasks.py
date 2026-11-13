@@ -213,6 +213,19 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             name = task_repo_name(base_repo_name, item["sequence"], item["slug"])
             progress=journal['tasks'].get(folder,{})
             exists=hub.repo_exists(owner,name)
+            if exists and progress.get('stage') == 'creating' and progress.get('repo') == f'{owner}/{name}':
+                # A throttled create request can leave the remote repository created without
+                # returning success. Adopt it only when the recovery journal records the exact
+                # owner/name/commit and the remote contains just that commit on main.
+                heads = hub.remote_heads(entry['repo_url'])
+                if set(heads) != {'main'} or heads.get('main') != commit:
+                    raise ValueError(
+                        f"建仓恢复发现未登记的已有仓库 {owner}/{name}，"
+                        "且远端内容不属于当前基准；停止避免认领"
+                    )
+                progress = {**progress, 'stage': 'created'}
+                journal['tasks'][folder] = progress
+                save_json(journal_path, journal)
             if exists and progress.get('stage') not in ('created','pushed','cloned','verified'):
                 raise ValueError(f"候选仓库名已被占用且未登记在本批清单中，停止避免认领: {owner}/{name}")
             if progress and progress.get('repo') != f'{owner}/{name}':raise ValueError('建仓日志的仓库归属不一致')
