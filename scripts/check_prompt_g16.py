@@ -44,9 +44,11 @@
 - 单一功能模块的题面是 G16 / G19 判词的常客（「单一…功能」「局部到跨层」「无架构取舍」），
   所以每题都必须落在 ≥2 个功能模块上（见 `multi_module` 信号）。
 
-判据只有一份，在 $cc-gsb-create 的 `scripts/gsb_difficulty.py`：跑题前
-（`gsb_runner.py`）、写表前（`gsb_result.py`）与出题前（本脚本）必须用同一套，谁都不许
-另抄一份正则。本脚本只负责从工作簿读题面、把判定按出题阶段的格式打印出来。
+基础判据只有一份，在 $cc-gsb-create 的 `scripts/gsb_difficulty.py`：跑题前
+（`gsb_runner.py`）、写表前（`gsb_result.py`）与出题前（本脚本）必须用同一套。S11 另外
+维护两个经真实回执绑定的薄层：平台负向硬闸只做降级；2026-11-15 正样本校准只补充
+平台已通过的“显式开放裁决”H3 证据。结构化 `difficulty_contract.py` 负责两个方案、
+结果不变量和同轴预先裁决的最终审计，不能用这几条句面替代 H1/H2。
 
 本脚本仍是词面兜底：`ok: true` 只代表题面里出现了够硬的难度信号，**不代表平台一定判
 困难**；生成方仍要按 `SKILL.md` 的三项特征逐条自查。`ok: false` 则必须换切入点和
@@ -174,6 +176,20 @@ MEDIUM_FLOOR_PATTERNS = {
     ],
 }
 
+# 2026-11-15 SOLO2 正样本校准：cc10010 #36 最终题面被平台判定 H1/H2/H3
+# 全部成立并 QC_PASSED，但共享词面判据没有识别「两版结论冲突时由你决定采用哪份」。
+# 这里只补充真实开放裁决的正向证据，不放宽 H1/H2，也不替代表达历史兼容或固定优先级；
+# 结构化 difficulty_contract v2 仍必须提供两个方案、结果不变量和同一冲突轴的一致性。
+PLATFORM_H3_OPEN_CHOICE_PATTERNS = [
+    r"(?:由你|由设计者|请自行|自行|自己)[^。；]{0,12}"
+    r"(?:判断|决定|选择|权衡|取舍|确定|设计)[^。；]{0,18}"
+    r"(?:优先级|哪份|哪一版|采用|先后|取舍|方案)",
+    r"(?:优先级|采用哪份|采用哪一版|谁先采用|谁优先)[^。；]{0,12}"
+    r"(?:由你|自行|自己|设计者)",
+    r"(?:需要|请)[^。；]{0,8}(?:明确|确定)[^。；]{0,18}"
+    r"(?:哪一版|哪一份|哪份|谁优先|优先级|采用)",
+]
+
 # 每题必须落到 ≥2 个功能模块：判据里已经算出的「多模块整合」特征，加上这些更直白的
 # 「同一个动作要牵动两个业务面」句式。单一模块是 G16 / G19 判词里出现最多的短板。
 MULTI_MODULE_EXTRA_PATTERNS = [
@@ -231,6 +247,17 @@ def multi_module_signals(text: str, strong_features: dict) -> list[str]:
             if token and token not in signals:
                 signals.append(token)
     return signals
+
+
+def platform_h3_choice_evidence(text: str) -> list[str]:
+    """识别平台已实测认可的显式开放裁决句。"""
+    evidence: list[str] = []
+    for pattern in PLATFORM_H3_OPEN_CHOICE_PATTERNS:
+        for match in re.finditer(pattern, str(text or "")):
+            token = match.group(0).strip()
+            if token and token not in evidence:
+                evidence.append(token)
+    return evidence
 
 
 def medium_floor_verdict(text: str) -> dict:
@@ -380,6 +407,12 @@ def evaluate(text: str, task_type: str = "") -> dict:
     required = int(verdict["要求特征数"])
     features = dict(verdict["特征"])
     hard_features = list(verdict["硬证据组"])
+    platform_h3_evidence = (
+        [] if features.get("关键设计取舍")
+        else platform_h3_choice_evidence(text)
+    )
+    if platform_h3_evidence:
+        features["关键设计取舍"] = platform_h3_evidence
     meets_hard_floor = len(features) >= required and bool(hard_features)
     policy = difficulty_policy(task_type)
     enforced = True
@@ -470,6 +503,7 @@ def evaluate(text: str, task_type: str = "") -> dict:
         "strong_evidence_count": sum(len(items) for items in features.values()),
         "hard_features": hard_features,
         "hard_feature_names": list(verdict["硬特征"]),
+        "platform_h3_evidence": platform_h3_evidence,
         "weak_evidence": dict(verdict["弱证据"]),
         "multi_module": bool(module_signals),
         "multi_module_signals": module_signals,
@@ -609,6 +643,10 @@ def check(
             "平台负向硬闸（2026-10-07 新增）：跨调用点收拢成一份、单业务域新建台账、"
             "示例数据铺底/备份重试这三类，即使词面命中硬证据，也必须重做；不能用"
             "「难度复核」备注放行。",
+            "正样本校准（2026-11-15）：8 条 SOLO2 QC_PASSED 题面都通过了 P4/P5。"
+            "其中「两版结论冲突时由你决定采用哪份」等显式开放裁决会写入 "
+            "platform_h3_evidence；这只是补 H3 词面漏识别，两个方案和同轴预先裁决"
+            "仍由 difficulty_contract v2 检查。",
             "多模块纪律：单一功能模块是 G16 / G19 判词里最常被点名的短板"
             "（「单一…功能」「局部到跨层」「无架构取舍」），每题都要落在 ≥2 个功能模块上；"
             "`multi_module` 字段给读数，缺了进 `hints`，`--strict` 才当不合格。",
@@ -718,6 +756,7 @@ def main() -> None:
                 "required_features": row["required_features"],
                 "strong_features": [k for k, v in row["strong_features"].items() if v],
                 "hard_features": row["hard_features"],
+                "platform_h3_evidence": row.get("platform_h3_evidence"),
                 "weak_evidence": [k for k, v in row["weak_evidence"].items() if v],
                 "multi_module": row["multi_module"],
                 "g19_applies": row["g19_applies"],

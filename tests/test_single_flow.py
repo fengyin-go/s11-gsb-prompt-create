@@ -57,14 +57,14 @@ class SingleFlow(unittest.TestCase):
         self.remote_repos = {}
         self.topic = {"version": 1, "profile": "gsb-semantic-v2", "base_commit": self.commit,
                       "domain": "测试领域", "subdirection": "测试方向",
-                      "difficulty_contract_version": 1,
+                      "difficulty_contract_version": 2,
                       "max_capacity": 1, "topics": [{"id": "orders", "name": "订单", "module": "orders",
                         "keywords": ["订单", "订单项"], "evidence": ["src/orders.py"],
                         "domain_objects": ["订单"], "domain_results": ["导出"], "seat_capacity": 1}],
                       "task_plan": [{"sequence": 1, "slug": "development", "task_type": "功能开发",
                                      "topic": "orders", "family": "新增能力", "angle": "订单导出",
                                      "difficulty_design": {
-                                         "version": 1,
+                                         "version": 2,
                                          "reasoning_challenge": {
                                              "constraints": [
                                                  {"kind": "transaction_consistency",
@@ -75,7 +75,7 @@ class SingleFlow(unittest.TestCase):
                                                   "failure_if_omitted": "重试会覆盖上一份完整数据"},
                                              ],
                                              "why_interact": "来源批次决定恢复位置，恢复范围又决定下游可见版本。",
-                                             "prompt_excerpt": "导出订单数据集。",
+                                             "prompt_excerpt": "导出失败后只能补写缺失记录。",
                                          },
                                          "module_integration": {
                                              "primary_module": "orders",
@@ -86,7 +86,7 @@ class SingleFlow(unittest.TestCase):
                                                  "relationship": "导出模块读取同一份订单数据集",
                                              }],
                                              "data_artifact": "订单数据集",
-                                             "prompt_excerpt": "导出订单数据集。",
+                                            "prompt_excerpt": "导出订单数据集。",
                                          },
                                          "design_tradeoff": {
                                              "decision": "恢复边界采用采集时间还是业务时间",
@@ -94,7 +94,7 @@ class SingleFlow(unittest.TestCase):
                                              "outcome_invariant": "下游只能看到完整订单数据集",
                                              "why_open": "题面只固定可观察结果，不选择内部时间键。",
                                              "implementation_not_prescribed": True,
-                                             "prompt_excerpt": "导出订单数据集。",
+                                            "prompt_excerpt": "恢复边界由你根据现有数据语义决定。",
                                          },
                                          "medium_counterexample": {
                                              "generic_task": "给订单列表增加一个导出按钮",

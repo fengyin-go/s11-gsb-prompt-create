@@ -25,10 +25,12 @@ description: "solo11 单轮 pointwise 批量出题：真实启动基准仓库并
 
 `scripts/s11_policy.py` 统一校验五类名称；topic map 的 `type_policy` 默认 `capacity-first`，只有用户明确要求固定比例时才设 `strict-ratio`。`allocate_counts` 保留最大余数法作为建议；计划、建仓和交接遵守同一策略。最高容量以真实源码、语义题位及所有质量闸门为依据；理论座位无法形成合格题时，记录具体原因并报告最终有效容量。
 
-2026-11-15 起，新批次还必须填写 `difficulty_contract_version: 1`，并为每个
+2026-11-15 起，新批次还必须填写 `difficulty_contract_version: 2`，并为每个
 `task_plan[]` 写结构化的 `difficulty_design`（H1 硬推理约束、H2 数据流模块整合、
-H3 开放设计取舍）。旧的 `难度复核` 备注不再具备放行效力；平台判废的 13 条历史题已固定在
-[references/difficulty-hardening.md](references/difficulty-hardening.md)，新题位不得再落到
+H3 开放设计取舍）。v2 同时校准了 SOLO2 的正反回执：cc10010 的 8 条 `QC_PASSED`
+题面全部通过 H1/H2/H3，另两条 H1/H2 成立但被平台判废的题都缺少真实 H3。
+旧版只保留历史含义，不再用于新题位。平台判废的 13 条历史题和本批正反样本已固定在
+[references/difficulty-hardening.md](references/difficulty-hardening.md)；新题位不得再落到
 “单页/单台账状态一致、第二模块只展示、题面把实现步骤写死”的中等模板。
 
 GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositories, too quickly` 创建频控时，记录原因并等待重试，优先遵守 Retry-After，否则从 60 秒指数退避到最多 900 秒，默认等待预算 2 小时，可用 `S11_GITHUB_RETRY_BUDGET_SECONDS` 调整。等待期间每次最多暂停 30 秒并向用户报告进展。权限、认证、仓库重名和非限流错误不能冒充限流重试。预算耗尽后保留清单并报告恢复位置；重试仍只能使用本批登记的仓库，不改名或认领陌生仓库。
@@ -87,11 +89,13 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 
 ## 3. 生成提示词
 
-先按 [references/domain-fit.md](references/domain-fit.md) 逐题复核最终题面的主任务、真实数据链路及可观察领域结果，再读 [references/difficulty-hardening.md](references/difficulty-hardening.md) 和 [references/generation-rules.md](references/generation-rules.md)，继承原 GSB 的真实代码准入、G16/G19 难度、负向案例、主题去重和跨项目防撞。类型已换为 S11 五类；功能优化按已有能力题审视，依赖升级与迁移必须有真实版本/兼容目标。五类默认困难；缺陷要求三项困难特征，其余至少两项，并至少一项硬证据。每题至少牵动两个真实功能模块；普通列表/概览一致不算第二模块。
+先按 [references/domain-fit.md](references/domain-fit.md) 逐题复核最终题面的主任务、真实数据链路及可观察领域结果，再读 [references/difficulty-hardening.md](references/difficulty-hardening.md) 和 [references/generation-rules.md](references/generation-rules.md)，继承原 GSB 的真实代码准入、G16/G19 难度、负向案例、主题去重和跨项目防撞。类型已换为 S11 五类；功能优化按已有能力题审视，依赖升级与迁移必须有真实版本/兼容目标。平台 G16 的基础项数仍是 `Bugfix` 三项、其余至少两项且至少一项硬证据；S11 额外要求每个题位都具备 H1/H2/H3，因为本批平台最终 P5 对全部通过样本都查实了这三项。每题至少牵动两个真实功能模块；普通列表/概览一致不算第二模块。
 
 交接前还要按 [references/review-readiness.md](references/review-readiness.md) 填写 `review_contract`：需求到业务行为的证据映射、真实测试行为、关键约束句、环境噪声排除项和上下文隔离声明。平台已实测的环境故障、电报式过程描述、泛化测试总数和跨会话记忆，不能留给运行侧事后猜。
 
-写题面前先填写 `difficulty_design`，不能用最终题面倒填。H1 至少写两条不同类别且相互作用的硬约束；H2 的第二模块必须消费、写入、持久化或编排真实数据产物，不能只是列表/详情/概览展示；H3 至少列两个可行方案，题面只固定结果不变量和兼容边界，不替设计者选定内部算法。`prompt_excerpt` 必须逐字出现在最终题面，源码锚点必须跨两个模块并可回查。
+写题面前先填写 `difficulty_design`，不能用最终题面倒填。H1 至少写两条不同类别且相互作用的硬约束，两条都要能从主任务读到失败后果；H2 的第二模块必须消费、写入、持久化或编排真实数据产物，不能只是列表/详情/概览展示；H3 必须写清同一冲突轴上的两个可行裁决、结果不变量和选择影响，题面要直接留下“哪份/哪一版/谁优先/采用哪种方案由设计者决定”的选择权。仅写“兼容历史”“固定以某版本为准”“失败后重试”或只写一句结果不变量都不算 H3。同一业务对象不能在另一句先被固定裁决、随后又要求设计者选择，否则平台会认为实现已经写死。
+
+三段 `prompt_excerpt` 必须逐字出现在最终题面，源码锚点必须跨两个模块并可回查。`check_prompt_g16.py` 是平台词面下限和已知正样本校准；`difficulty_contract.py` v2 是更严格的结构化 H3 检查，两者都必须通过。`check_prompt_g16.py` 对“两版结论冲突时由你决定采用哪份”一类已实测通过的开放句做了正向校准，但不会仅凭该句替代 H1/H2 或结构化取舍设计。
 
 题面只描述用户问题、目标行为、业务边界和可观察的验收结果。直接写想要实现的需求，不写“本需求需要……”“本次任务要……”“这次我需要……”“请你帮我……”之类的需求叙述外壳或第一人称铺垫；用“请……”直接写目标行为、边界和结果。正常业务时间语义不受影响，例如“本次结算周期”可以保留。领域主动作必须先写清楚“读取/采集什么数据，执行什么处理，生成什么数据结果，如何观察结果”，并且逐字使用题位的 `prompt_main_request`；权限、路由、灰度、缓存、发布和 UI 只能跟在数据链路之后作为支撑。不得为方便验收或录屏，额外指定新建的验证脚本、文件路径、命令参数、测试框架或内部实现结构。真实已有的接口/字段、兼容契约及用户明确指定的交付形式可保留；验证方式与交接编排按引用规则单独维护。
 
@@ -101,7 +105,7 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 2. 同步平台历史语料，检查全局注册表，扫本批及历史近邻。默认共享原 GSB 全局注册表，保留跨批次防撞；允许用 `GSB_CROSS_PROJECT_REGISTRY` 显式指定。没有历史时只能按引用规则记录一次 bootstrap。
 3. 先生成台账与题位表。逐题读取自己的 origin 源码，避开依赖目录。缺陷必须真实复现，不猜现象或结果。台账中记录领域准入结论、主要工作、`domain_chain`、`prompt_main_request`、反事实通用任务、受影响的数据对象/链路、带行号源码锚点和领域验收结果；领域不符或证据不足的候选先换切入点，不进入写表。
 4. 写表只调用本地 `batch_prompt_workbook.py update`；它在写入前执行题面直接表达检查、领域 v2 契约、结构化困难契约、G16/G19 和原三道闸、跨项目闸。题面出现需求/任务自指、第一人称请求或“请你帮我”类外壳时直接拒写。领域闸要求主动作句位于题面前半段、逐字覆盖领域输入/处理/输出/观察结果，源码锚点连续原文可回查；只在标题或末尾补业务名词、替换对象后仍是通用服务任务均不放行。禁止 `--allow-gate-failure`。`tasks.xlsx` 固定原八列，题型严格使用上表名称。
-5. 完成后全量复检领域准入、困难契约与题面副本；交接前再次核对最终题面和 requirements 的主体一致。G16/G19、主题及查重通过不能替代领域准入或 difficulty_design。strict 或困难契约命中时逐项重写；`难度复核` 备注不能放行，已确认负向硬闸不能备注放行。
+5. 完成后全量复检领域准入、困难契约与题面副本；交接前再次核对最终题面和 requirements 的主体一致。G16/G19、主题及查重通过不能替代领域准入或 difficulty_design。strict 或困难契约命中时逐项重写；`难度复核` 备注不能放行，已确认负向硬闸不能备注放行。若词面 G16 已通过但没有真实 H3 选择权，仍以 difficulty_contract v2 的结果为准。
 
 ```bash
 python3 <skill>/scripts/sync_platform_prompt_corpus.py

@@ -9,7 +9,11 @@ platform because the prompt itself only described medium-sized work.
 The contract does not replace semantic review. It makes the review auditable by
 requiring a source-anchored reasoning challenge, a real data-flow module
 integration, an open design tradeoff, and prompt excerpts that prove those
-decisions reached the final prompt.
+decisions reached the final prompt. Version 2 uses the 2026-11-15 SOLO2
+calibration: eight accepted prompts all passed P4/P5, while two discarded
+prompts had H1/H2 but no genuine open H3 choice. The tradeoff check therefore
+requires an explicit choice axis and rejects a competing fixed-resolution rule
+on the same business object.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 FOLDER_PLAN_RE = re.compile(
     r"-(0[1-9]|[1-9][0-9])-(development|bugfix|optimization|refactor|migration)$"
 )
@@ -62,10 +66,31 @@ ANTI_PATTERNS = (
     "example_data_only",
     "cross_call_merge_only",
 )
-OPEN_DECISION_RE = re.compile(
-    r"(自行|自定|自拟|权衡|取舍|选择|决定|以谁为准|谁优先|优先级|冲突时|"
-    r"兼容|回退|不变量|必须保证|不得|不能)"
+OPEN_CHOICE_RE = re.compile(
+    r"(?:"
+    r"(?:由你|由设计者|请你|请自行|自行|自己)[^。；]{0,12}"
+    r"(?:判断|决定|选择|权衡|取舍|确定|设计)"
+    r"|(?:需要|请)[^。；]{0,8}(?:明确|确定)[^。；]{0,18}"
+    r"(?:哪一版|哪一份|哪份|谁优先|优先级|采用)"
+    r"|(?:优先级|采用哪份|采用哪一版|谁先采用|谁优先)[^。；]{0,12}"
+    r"(?:由你|自行|自己|设计者)"
+    r")"
 )
+CLOSED_RESOLUTION_RE = re.compile(
+    r"(?:冲突|先后)[^。；]{0,40}(?:以|按)[^。；]{0,40}"
+    r"(?:为准|为依据|作为[^。；]{0,12}依据|优先)"
+)
+CHOICE_GENERIC_GRAMS = {
+    "冲突时",
+    "优先级",
+    "由你判",
+    "由你决",
+    "由你权",
+    "由你选",
+    "采用哪",
+    "哪一份",
+    "哪一版",
+}
 PRESCRIPTION_MARKERS = (
     "第一步",
     "第二步",
@@ -88,6 +113,56 @@ def _text_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in (_text(raw) for raw in value) if item]
+
+
+def _sentences(text: str) -> list[str]:
+    return [
+        part.strip()
+        for part in re.split(r"[。；！？!?\n]+", str(text or ""))
+        if part.strip()
+    ]
+
+
+def _cjk_trigrams(text: str) -> set[str]:
+    compact = re.sub(r"[^\u4e00-\u9fff]", "", text)
+    return {compact[index:index + 3] for index in range(max(0, len(compact) - 2))}
+
+
+def _tradeoff_conflict_errors(prompt: str, excerpt: str) -> list[str]:
+    """Reject a fake open choice that another sentence has already decided.
+
+    SOLO2 record 6463/cc10010-14 passed the lexical H1/H2 checks but was
+    discarded because one sentence fixed checkpoint precedence while another
+    asked the implementer to choose it. The shared business term (for example
+    ``检查点``) identifies that contradiction. A fixed rule about a different
+    object remains valid, so overlap must be on a meaningful three-character
+    term rather than the generic words ``冲突`` or ``优先级``.
+    """
+    if not prompt or not excerpt:
+        return []
+    open_sentences = [sentence for sentence in _sentences(prompt) if excerpt in sentence]
+    if not open_sentences:
+        return []
+    closed_sentences = [
+        sentence for sentence in _sentences(prompt)
+        if CLOSED_RESOLUTION_RE.search(sentence)
+    ]
+    for open_sentence in open_sentences:
+        for closed_sentence in closed_sentences:
+            if closed_sentence == open_sentence:
+                continue
+            overlap = (
+                _cjk_trigrams(open_sentence)
+                & _cjk_trigrams(closed_sentence)
+            ) - CHOICE_GENERIC_GRAMS
+            if overlap:
+                term = sorted(overlap, key=lambda item: (-len(item), item))[0]
+                return [
+                    "design_tradeoff 的同一业务对象既要求设计者裁决，"
+                    f"又在另一句被固定为一种结果（共同对象：{term}）；"
+                    "平台会把这种题视为实现已写死，请删除固定裁决或更换取舍轴"
+                ]
+    return []
 
 
 def _sequence_for_folder(folder: str) -> int | None:
@@ -227,8 +302,15 @@ def _design_errors(
         errors.append(f"{where} 的 design_tradeoff.why_open 必须说明为何没有写死实现")
     if tradeoff.get("implementation_not_prescribed") is not True:
         errors.append(f"{where} 的 design_tradeoff.implementation_not_prescribed 必须为 true")
-    if len(_text(tradeoff.get("prompt_excerpt"))) < 8:
+    tradeoff_excerpt = _text(tradeoff.get("prompt_excerpt"))
+    if len(tradeoff_excerpt) < 8:
         errors.append(f"{where} 的 design_tradeoff.prompt_excerpt 缺失")
+    elif not OPEN_CHOICE_RE.search(tradeoff_excerpt):
+        errors.append(
+            f"{where} 的 design_tradeoff.prompt_excerpt 必须留下真实选择权："
+            "明确让设计者决定哪份、哪一版、谁优先或采用哪种方案；"
+            "只写结果不变量、兼容要求或固定“以谁为准”不构成 H3"
+        )
 
     counterexample = design.get("medium_counterexample")
     if not isinstance(counterexample, dict):
@@ -300,10 +382,10 @@ def _design_errors(
         if artifact and module_excerpt and artifact not in module_excerpt:
             errors.append(f"{where} 的第二模块题面摘录没有包含数据产物：{artifact}")
         decision_excerpt = excerpts["design_tradeoff"]
-        if decision_excerpt and not OPEN_DECISION_RE.search(decision_excerpt):
-            errors.append(f"{where} 的 design_tradeoff 题面摘录必须写出需要判断的取舍或结果不变量")
+        if decision_excerpt:
+            errors.extend(_tradeoff_conflict_errors(prompt, decision_excerpt))
         prescription_count = sum(prompt.count(marker) for marker in PRESCRIPTION_MARKERS)
-        if prescription_count >= 4 and not OPEN_DECISION_RE.search(decision_excerpt):
+        if prescription_count >= 4 and not OPEN_CHOICE_RE.search(decision_excerpt):
             errors.append(
                 f"{where} 的题面步骤写得太死且没有留下实现取舍；"
                 "减少先/再/逐项等过程指令，改为写结果不变量和可选裁决轴"
@@ -342,6 +424,14 @@ def prompt_errors(
     repo: Path | None,
 ) -> list[str]:
     errors: list[str] = []
+    try:
+        version = int(topic_map.get("difficulty_contract_version") or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version != CONTRACT_VERSION:
+        errors.append(
+            f"topic map.difficulty_contract_version 必须是 {CONTRACT_VERSION}"
+        )
     plans = {
         int(plan.get("sequence")): plan
         for plan in topic_map.get("task_plan") or []

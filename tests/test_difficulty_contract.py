@@ -47,7 +47,7 @@ class DifficultyContractTest(unittest.TestCase):
             "恢复边界请根据现有数据语义自行设计，但下游不得看到半成品。"
         )
         self.design = {
-            "version": 1,
+            "version": 2,
             "reasoning_challenge": {
                 "constraints": [
                     {
@@ -138,7 +138,7 @@ class DifficultyContractTest(unittest.TestCase):
             "difficulty_design": self.design,
         }
         self.topic = {
-            "difficulty_contract_version": 1,
+            "difficulty_contract_version": 2,
             "task_plan": [self.plan],
         }
         self.record = {
@@ -162,7 +162,7 @@ class DifficultyContractTest(unittest.TestCase):
         for case in REJECTIONS:
             with self.subTest(case=case["task_id"]):
                 topic = {
-                    "difficulty_contract_version": 1,
+                    "difficulty_contract_version": 2,
                     "task_plan": [{
                         "sequence": case["sequence"],
                         "task_type": case["task_type"],
@@ -215,6 +215,52 @@ class DifficultyContractTest(unittest.TestCase):
         )
         errors = self.errors(topic, record)
         self.assertTrue(any("题面步骤写得太死" in error for error in errors))
+
+    def test_tradeoff_excerpt_requires_a_real_open_choice(self):
+        topic = copy.deepcopy(self.topic)
+        design = topic["task_plan"][0]["difficulty_design"]
+        design["design_tradeoff"]["prompt_excerpt"] = "已发布批次不得回退"
+        record = copy.deepcopy(self.record)
+        record["提示词"] = (
+            "请解析订单数据并生成已发布订单数据集。"
+            "导出中断后保留上一份完整订单数据集，重试只补写缺失记录，"
+            "已发布批次不得回退。"
+            "分析导出中心必须读取同一份已发布订单数据集并保留来源批次。"
+            "已发布批次不得回退。"
+        )
+        errors = self.errors(topic, record)
+        self.assertTrue(any("必须留下真实选择权" in error for error in errors))
+
+    def test_20261115_platform_accepted_choice_phrase_is_recognized(self):
+        excerpt = "两版结论冲突时由你决定采用哪份"
+        self.assertTrue(difficulty_contract.OPEN_CHOICE_RE.search(excerpt))
+        self.assertEqual(
+            difficulty_contract._tradeoff_conflict_errors(
+                "审计清单与详情记录产生两版结论。" + excerpt + "。",
+                excerpt,
+            ),
+            [],
+        )
+
+    def test_same_axis_cannot_be_fixed_elsewhere(self):
+        topic = copy.deepcopy(self.topic)
+        design = topic["task_plan"][0]["difficulty_design"]
+        design["design_tradeoff"].update({
+            "decision": "历史订单检查点与当前订单检查点发生冲突时谁优先",
+            "options": ["历史检查点优先", "当前检查点优先"],
+            "prompt_excerpt": "历史检查点与当前检查点冲突时，由你判断优先级",
+        })
+        record = copy.deepcopy(self.record)
+        record["提示词"] = (
+            "请解析订单数据并生成已发布订单数据集。"
+            "窗口选择冲突时，以最新有效检查点作为裁决依据，旧检查点继续保存原始范围。"
+            "导出中断后保留上一份完整订单数据集，重试只补写缺失记录，"
+            "已发布批次不得回退。"
+            "分析导出中心必须读取同一份已发布订单数据集并保留来源批次。"
+            "历史检查点与当前检查点冲突时，由你判断优先级。"
+        )
+        errors = self.errors(topic, record)
+        self.assertTrue(any("又在另一句被固定为一种结果" in error for error in errors))
 
     def test_difficulty_note_cannot_override_g16(self):
         from check_prompt_g16 import check

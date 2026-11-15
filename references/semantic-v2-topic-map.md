@@ -9,7 +9,7 @@
   "domain": "数据工程",
   "subdirection": "数仓与数据湖",
   "base_commit": "最终已推送的40位SHA",
-  "difficulty_contract_version": 1,
+  "difficulty_contract_version": 2,
   "max_capacity": 20,
   "topics": [
     {
@@ -33,7 +33,7 @@
       "family": "新增能力",
       "angle": "基于真实代码选择的独特切入点",
       "difficulty_design": {
-        "version": 1,
+        "version": 2,
         "reasoning_challenge": {
           "constraints": [
             {
@@ -147,7 +147,7 @@
 
 最终题面除命中 topic、`domain_objects` 和 `domain_results` 外，还必须逐字写入 `domain_chain` 的输入、处理、输出、可观察结果以及前置的 `prompt_main_request`。脚本会核对源码锚点、连续原文和主请求位置；只出现业务名词、把领域句放在末尾或替换对象后仍是通用服务任务，都会在写表前被拦下。细节见 [domain-fit.md](domain-fit.md)。
 
-`difficulty_contract_version` 和 `task_plan[].difficulty_design` 是独立的第二个硬契约。H1/H2/H3 的题面摘录必须逐字出现在最终提示词，第二模块必须是真实数据流角色，设计取舍必须至少保留两个方案。完整字段和 2026-11-15 判废复盘见 [difficulty-hardening.md](difficulty-hardening.md)。
+`difficulty_contract_version` 和 `task_plan[].difficulty_design` 是独立的第二个硬契约。H1/H2/H3 的题面摘录必须逐字出现在最终提示词，第二模块必须是真实数据流角色，设计取舍必须至少保留两个方案。v2 的 H3 题面摘录必须明确留下选择权，不能只写兼容要求、失败重试或结果不变量；同一冲突轴也不能在另一句被预先固定。完整字段、2026-11-15 判废复盘和 8 条平台通过样本见 [difficulty-hardening.md](difficulty-hardening.md)。
 
 类型策略 `type_policy` 默认 `capacity-first`：30/30/30/5/5 只是建议，不因配比缩减最高有效容量。只有用户明确指定固定比例才设 `strict-ratio` 并由 s11_policy.allocate_counts 校验。validate_topic_map.py 始终校验 schema、合法类型、topic 席位与基准 SHA。扩容保留旧条目的 sequence、type、topic、family、angle、任务号与仓库，只向末尾追加。
 

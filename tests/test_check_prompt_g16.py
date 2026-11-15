@@ -20,6 +20,11 @@ PLATFORM_REJECTIONS = json.loads(
         encoding="utf-8"
     )
 )["cases"]
+PLATFORM_PASSES_20261115 = json.loads(
+    (HERE / "fixtures" / "platform-difficulty-passes-20261115.json").read_text(
+        encoding="utf-8"
+    )
+)["cases"]
 # 2026-09-29 那批语料主体（cc10016 / cc10017）；2026-10-01 又补进 cc10018 / cc10019 的真实回执。
 LEGACY = [c for c in CORPUS["cases"] if c["项目"] in ("cc10016", "cc10017")]
 NEW_20261001 = [c for c in CORPUS["cases"] if c["项目"] in ("cc10018", "cc10019")]
@@ -161,6 +166,19 @@ class PromptDifficultyFloorTest(unittest.TestCase):
             self.assertIn("G16", by_id[record_id]["violation_kinds"])
         for record_id in ("20806", "21834"):
             self.assertIn("G19", by_id[record_id]["violation_kinds"])
+
+    def test_20261115_platform_passed_prompts_are_not_new_false_negatives(self) -> None:
+        """8 条真实 QC_PASSED 题面（含 #36）都通过 G16 词面下限。"""
+        self.assertEqual(len(PLATFORM_PASSES_20261115), 8)
+        items = [
+            (case["task_id"], case["task_type"], case["prompt"])
+            for case in PLATFORM_PASSES_20261115
+        ]
+        result = MODULE.check(items)
+        self.assertTrue(result["ok"], result["violations"])
+        by_id = {row["label"]: row for row in result["items"]}
+        self.assertEqual(by_id["cc10010-36-bugfix"]["platform_h3_evidence"],
+                         ["由你决定采用哪份"])
 
     def test_g18_discard_is_orthogonal_to_the_difficulty_gate(self) -> None:
         """G18（当日两侧满分占比超限）与题面难度不是一回事：难度闸不因它拦人。"""
