@@ -11,6 +11,7 @@ from pathlib import Path
 import batch_prompt_workbook as workbook
 import domain_fit
 import difficulty_contract
+import prompt_style
 import review_contract
 from create_batch_tasks import MANIFEST, git, read_json, save_json, verify_task
 import github_helpers as hub
@@ -32,6 +33,9 @@ def validate_generation(parent, rows, origin, metadata=None):
     prompts = [(row["子文件夹名称"], row["任务类型"], row["提示词"]) for row in rows]
     if not g16_check(prompts)["ok"]:
         raise ValueError("整批 G16/G19 难度闸门未通过")
+    style_errors = prompt_style.prompt_errors(rows)
+    if style_errors:
+        raise ValueError("题面表达闸门未通过：" + "；".join(style_errors))
     topic_map = load_topic_map(parent=parent, repo=origin, required=True,
                                expected_base_commit=git(origin, "rev-parse", "HEAD"))
     domain_errors = domain_fit.map_errors(topic_map, origin)

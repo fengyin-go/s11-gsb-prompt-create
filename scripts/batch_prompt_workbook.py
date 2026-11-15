@@ -485,6 +485,7 @@ def run_write_gates(
     from check_prompt_difficulty import check as difficulty_check
     import domain_fit
     import difficulty_contract
+    import prompt_style
     from check_repo_theme import (
         DEFAULT_MAX_PER_MODE,
         GATE_VERSION,
@@ -532,6 +533,7 @@ def run_write_gates(
     domain_errors = domain_fit.map_errors(topic_map, repo) if topic_map else []
     if topic_map:
         domain_errors += domain_fit.prompt_errors(records, topic_map)
+    style_errors = prompt_style.prompt_errors(records)
     difficulty_contract_errors = (
         difficulty_contract.prompt_errors(records, topic_map, repo) if topic_map else []
     )
@@ -581,6 +583,7 @@ def run_write_gates(
     dedup = dedup_check(items, 0.2)
 
     problems: list[str] = []
+    problems += [f"题面表达未通过：{error}" for error in style_errors]
     problems += [f"领域相关性未通过：{error}" for error in domain_errors]
     problems += [f"困难设计契约未通过：{error}" for error in difficulty_contract_errors]
     pending_rows = sum(1 for record in records if not str(record.get("提示词") or "").strip())
@@ -639,6 +642,11 @@ def run_write_gates(
             "ok": not domain_errors,
             "gate_version": domain_fit.DOMAIN_GATE_VERSION,
             "problems": domain_errors,
+        },
+        "prompt_style": {
+            "ok": not style_errors,
+            "version": prompt_style.STYLE_GATE_VERSION,
+            "problems": style_errors,
         },
         "difficulty_contract": {
             "ok": not difficulty_contract_errors,
@@ -699,6 +707,7 @@ def write_generation_manifest(
         "review_required_labels": (gate.get("theme") or {}).get("review_required_labels"),
         "violations": gate.get("problems") or [],
         "domain": gate.get("domain") or {},
+        "prompt_style": gate.get("prompt_style") or {},
         "difficulty_contract": gate.get("difficulty_contract") or {},
         "cross_project": gate.get("cross_project") or {},
         "skill": skill,
@@ -911,6 +920,7 @@ def update(
                 "error": "写入前的闸门没有通过，这条提示词没有写进工作簿",
                 "gate_version": gate.get("gate_version"),
                 "problems": gate.get("problems"),
+                "prompt_style": gate.get("prompt_style"),
                 "theme": gate.get("theme"),
                 "difficulty": gate.get("difficulty"),
                 "dedup": gate.get("dedup"),
@@ -986,6 +996,7 @@ def update(
             "gate_version": gate.get("gate_version"),
             "problems": gate.get("problems"),
             "domain": gate.get("domain"),
+            "prompt_style": gate.get("prompt_style"),
             "module_counts": (gate.get("theme") or {}).get("module_counts"),
             "topic_policy": (gate.get("theme") or {}).get("topic_policy"),
             "topic_counts": (gate.get("theme") or {}).get("topic_counts"),
