@@ -48,7 +48,7 @@ GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositorie
   batch-manifest.json                 交接时生成
   cc10003-01-bugfix/
     origin/                           独立 Git 克隆，main 固定在初始提交，保留本地依赖
-    workspace/                        建仓时空；交接时从任务仓库 main 克隆，不携带宿主依赖
+    workspace/                        建仓时空；交接时从任务仓库 main 克隆，作为宿主 Git 交付树
     task-seed.json                    编号、类型、topic、仓库、初始提交
     task.json recording-plan.json review-contract.json prompt.txt   交接时生成
 ```
@@ -83,7 +83,7 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123
 ```
 
-依赖只复制到 origin，保留链接、权限和时间戳，不用硬链接，不提交依赖。至少在代表性 origin 和实际任务环境分别做无安装启动 smoke，全栈覆盖前后端。宿主 native 依赖不能直接搬到 Linux 容器。交接时 workspace 仍为干净克隆；运行侧按冻结基线在实际 Linux 镜像中一次准备、验证依赖，再向每题对应目录复制，起跑只允许有运行侧有效缓存回执解释的忽略依赖；初始和产物 Git 快照均不得包含依赖。详见 [运行侧缓存规则](../s11-feedback-run/references/performance.md)。
+依赖只复制到 origin，保留链接、权限和时间戳，不用硬链接，不提交依赖。至少在代表性 origin 和实际任务环境分别做无安装启动 smoke，全栈覆盖前后端。宿主 native 依赖不能直接搬到 Linux 容器。交接时 workspace 仍为干净克隆；运行侧从冻结初始提交生成不含 `.git` 的临时运行树，按实际 Linux 镜像准备、验证依赖后只把依赖缓存复制到运行树。初始和产物 Git 快照均不得包含依赖。详见 [运行侧缓存规则](../s11-feedback-run/references/performance.md)。
 
 `--verify` 只读复检原始计划对应的任务、origin/main 与远端仅有 main；运行后 main 可以推进，origin 和 task.json 的初始 SHA 保留。输出容量三块座位、实际题数、各类型数量、成功与失败清单。限流按上面的等待策略重试；其他失败不静默重试、不覆盖已有内容。
 
@@ -133,7 +133,7 @@ python3 <s11-feedback-run>/scripts/fbr_run.py --root <root> run --batch b1111-01
 
 交接脚本按 type_policy 重新核对题型、难度、主题和跨项目查重，冻结 V2 基线与 hash，生成 task.json、录屏方案、原文 prompt.txt 和 batch-manifest.json，从远端 main 把唯一 workspace 铺为干净克隆，再实际调用运行侧 `load_task` 校验。已有运行状态的任务不覆盖。
 
-运行侧只挂载 workspace，一题一新容器、一次首轮题面；原有获准“继续”、工程异常归档规则保持。产物只推 main。出题交接不代表用户已授权真实跑题、产物推送或平台提交，按 `s11-feedback-run` 原授权边界执行。
+运行侧不把 Git workspace 挂给模型，而是从冻结初始提交生成无 `.git` 的运行树并只挂载该目录；一题一新容器、一次首轮题面，原有获准“继续”、工程异常归档规则保持。运行结束后由宿主侧把运行树同步回 workspace，再生成快照并只推 main。出题交接不代表用户已授权真实跑题、产物推送或平台提交，按 `s11-feedback-run` 原授权边界执行。
 
 ## 验证与反馈
 
