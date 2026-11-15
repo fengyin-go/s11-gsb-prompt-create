@@ -25,6 +25,12 @@ description: "solo11 单轮 pointwise 批量出题：真实启动基准仓库并
 
 `scripts/s11_policy.py` 统一校验五类名称；topic map 的 `type_policy` 默认 `capacity-first`，只有用户明确要求固定比例时才设 `strict-ratio`。`allocate_counts` 保留最大余数法作为建议；计划、建仓和交接遵守同一策略。最高容量以真实源码、语义题位及所有质量闸门为依据；理论座位无法形成合格题时，记录具体原因并报告最终有效容量。
 
+2026-11-15 起，新批次还必须填写 `difficulty_contract_version: 1`，并为每个
+`task_plan[]` 写结构化的 `difficulty_design`（H1 硬推理约束、H2 数据流模块整合、
+H3 开放设计取舍）。旧的 `难度复核` 备注不再具备放行效力；平台判废的 13 条历史题已固定在
+[references/difficulty-hardening.md](references/difficulty-hardening.md)，新题位不得再落到
+“单页/单台账状态一致、第二模块只展示、题面把实现步骤写死”的中等模板。
+
 GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositories, too quickly` 创建频控时，记录原因并等待重试，优先遵守 Retry-After，否则从 60 秒指数退避到最多 900 秒，默认等待预算 2 小时，可用 `S11_GITHUB_RETRY_BUDGET_SECONDS` 调整。等待期间每次最多暂停 30 秒并向用户报告进展。权限、认证、仓库重名和非限流错误不能冒充限流重试。预算耗尽后保留清单并报告恢复位置；重试仍只能使用本批登记的仓库，不改名或认领陌生仓库。
 
 ## 单份目录和 main
@@ -42,7 +48,7 @@ GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositorie
     origin/                           独立 Git 克隆，main 固定在初始提交，保留本地依赖
     workspace/                        建仓时空；交接时从任务仓库 main 克隆，不携带宿主依赖
     task-seed.json                    编号、类型、topic、仓库、初始提交
-    task.json recording-plan.json prompt.txt   交接时生成
+    task.json recording-plan.json review-contract.json prompt.txt   交接时生成
 ```
 
 一个提示词对应一个任务目录、一个独立 GitHub 仓库、一份 origin、一份 workspace。远端只创建 `main`。初始时 main 指向基准提交；运行侧之后把产物提交推进到同一 main。初始快照使用 `/commit/<initial_commit>`，不要要求运行后的 main 仍停在基线，也不要另建基线、A、B 分支。
@@ -61,14 +67,15 @@ GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositorie
 
 ## 2. 排题位、建仓
 
-先读 [references/domain-fit.md](references/domain-fit.md)，按题目的主要工作及领域数据结果核验领域准入；再读 [references/semantic-v2-topic-map.md](references/semantic-v2-topic-map.md)，按真实源码和页面建立 `repo-topic-map.json`，`profile` 保留 `gsb-semantic-v2`。topic map 必须写明 `domain`、`subdirection`；每个 topic 写明 `domain_objects`、`domain_results`，每个 `task_plan` 题位写明 `domain_fit` 的主任务、领域结果、真实源码依据和 pass 结论。`task_plan` 使用上表五个 slug 与任务类型，逐项包含 sequence、topic、family、angle。类型比例不阻塞容量优先计划，同 topic 的多题跨家族并受 seat_capacity 限制。
+先读 [references/domain-fit.md](references/domain-fit.md)，按题目的主要工作及领域数据结果核验领域准入；再读 [references/semantic-v2-topic-map.md](references/semantic-v2-topic-map.md)，按真实源码和页面建立 `repo-topic-map.json`，`profile` 保留 `gsb-semantic-v2`。topic map 必须写明 `domain`、`subdirection`；每个 topic 写明 `domain_objects`、`domain_results`，每个 `task_plan` 题位写明 v2 `domain_fit`：主任务、领域结果、`domain_chain`、前置 `prompt_main_request`、反事实通用任务和至少两条带行号原文的 `domain_anchors`。`task_plan` 使用上表五个 slug 与任务类型，逐项包含 sequence、topic、family、angle。类型比例不阻塞容量优先计划，同 topic 的多题跨家族并受 seat_capacity 限制。
 
-每个题位先确认领域适配再计入容量、创建仓库。所属仓库是数据工程项目、topic 名叫血缘或圈选，都不能证明题目主体属于数据工程；通用前端升级、构建、路由或部署不得靠借用两个业务页面取得领域资格。迁移题缺少真实领域目标时换成有源码依据的合格题位，不为配比凑迁移题。
+每个题位先确认领域适配和 H1/H2/H3 困难设计，再计入容量、创建仓库。所属仓库是数据工程项目、topic 名叫血缘或圈选，都不能证明题目主体属于数据工程；服务路由、负载均衡、限流降级、权限配额、网关预检、发布流水线和依赖锁默认不属于数据工程，除非它们只是真实数据采集/加工/存储链路的支撑且主工作句明确改变数据结果。通用前端升级、构建、路由或部署不得靠借用两个业务页面取得领域资格。迁移题缺少真实领域目标时换成有源码依据的合格题位，不为配比凑迁移题。
 
 容量沿用语义题位、主体/模式护栏和单仓上限 50、每模式 3；源码派生有 warning 就先修扫描，不猜容量。新主体仅功能开发可用，并遵守原来的限流、跨域和台账规则。扩容只向最大 sequence 后追加；旧序号、类型、topic、family、angle 和仓库保持原样，追加默认保持容量优先；只有显式 strict-ratio 才核对整体比例。不要重排历史题。
 
 ```bash
-python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map.json --repo <源仓库> --expected-base-commit <SHA> --require-domain-fit
+python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map.json --repo <源仓库> --expected-base-commit <SHA> --require-domain-fit --require-difficulty-design
+python3 <skill>/scripts/domain_fit.py --parent <batch目录> --repo <源仓库>
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123 --dry-run
 # 核对演练清单后，去掉 --dry-run 创建并发布初始仓库
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123
@@ -80,17 +87,21 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 
 ## 3. 生成提示词
 
-先按 [references/domain-fit.md](references/domain-fit.md) 逐题复核最终题面的主任务、真实数据链路及可观察领域结果，再读 [references/generation-rules.md](references/generation-rules.md)，继承原 GSB 的真实代码准入、G16/G19 难度、负向案例、主题去重和跨项目防撞。类型已换为 S11 五类；功能优化按已有能力题审视，依赖升级与迁移必须有真实版本/兼容目标。五类默认困难；缺陷要求三项困难特征，其余至少两项，并至少一项硬证据。每题至少牵动两个真实功能模块；普通列表/概览一致不算第二模块。
+先按 [references/domain-fit.md](references/domain-fit.md) 逐题复核最终题面的主任务、真实数据链路及可观察领域结果，再读 [references/difficulty-hardening.md](references/difficulty-hardening.md) 和 [references/generation-rules.md](references/generation-rules.md)，继承原 GSB 的真实代码准入、G16/G19 难度、负向案例、主题去重和跨项目防撞。类型已换为 S11 五类；功能优化按已有能力题审视，依赖升级与迁移必须有真实版本/兼容目标。五类默认困难；缺陷要求三项困难特征，其余至少两项，并至少一项硬证据。每题至少牵动两个真实功能模块；普通列表/概览一致不算第二模块。
 
-题面只描述用户问题、目标行为、业务边界和可观察的验收结果。不得为方便验收或录屏，额外指定新建的验证脚本、文件路径、命令参数、测试框架或内部实现结构。真实已有的接口/字段、兼容契约及用户明确指定的交付形式可保留；验证方式与交接编排按引用规则单独维护。
+交接前还要按 [references/review-readiness.md](references/review-readiness.md) 填写 `review_contract`：需求到业务行为的证据映射、真实测试行为、关键约束句、环境噪声排除项和上下文隔离声明。平台已实测的环境故障、电报式过程描述、泛化测试总数和跨会话记忆，不能留给运行侧事后猜。
+
+写题面前先填写 `difficulty_design`，不能用最终题面倒填。H1 至少写两条不同类别且相互作用的硬约束；H2 的第二模块必须消费、写入、持久化或编排真实数据产物，不能只是列表/详情/概览展示；H3 至少列两个可行方案，题面只固定结果不变量和兼容边界，不替设计者选定内部算法。`prompt_excerpt` 必须逐字出现在最终题面，源码锚点必须跨两个模块并可回查。
+
+题面只描述用户问题、目标行为、业务边界和可观察的验收结果。领域主动作必须先写清楚“读取/采集什么数据，执行什么处理，生成什么数据结果，如何观察结果”，并且逐字使用题位的 `prompt_main_request`；权限、路由、灰度、缓存、发布和 UI 只能跟在数据链路之后作为支撑。不得为方便验收或录屏，额外指定新建的验证脚本、文件路径、命令参数、测试框架或内部实现结构。真实已有的接口/字段、兼容契约及用户明确指定的交付形式可保留；验证方式与交接编排按引用规则单独维护。
 
 使用本 skill 自带的辅助脚本；它们是原 helper 的隔离副本，避免共享脚本把功能开发和功能优化折叠成同一旧类型。G16 核心判据仍读取同级 `cc-gsb-create/scripts/gsb_difficulty.py`，不可自行抄判据。
 
 1. 确认当前 SHA 的启动预检、依赖复制与无安装 smoke 已通过。
 2. 同步平台历史语料，检查全局注册表，扫本批及历史近邻。默认共享原 GSB 全局注册表，保留跨批次防撞；允许用 `GSB_CROSS_PROJECT_REGISTRY` 显式指定。没有历史时只能按引用规则记录一次 bootstrap。
-3. 先生成台账与题位表。逐题读取自己的 origin 源码，避开依赖目录。缺陷必须真实复现，不猜现象或结果。台账中记录领域准入结论、主要工作、受影响的数据对象/链路、源码依据和领域验收结果；领域不符或证据不足的候选先换切入点，不进入写表。
-4. 写表只调用本地 `batch_prompt_workbook.py update`；它在写入前执行领域题位契约、G16/G19 和原三道闸、跨项目闸。领域闸要求最终题面命中计划 topic，并同时出现该题位的领域对象和可观察领域结果；只在标题或末尾补业务名词不放行。禁止 `--allow-gate-failure`。`tasks.xlsx` 固定原八列，题型严格使用上表名称。
-5. 完成后全量复检领域准入与题面副本；交接前再次核对最终题面和 requirements 的主体一致。G16/G19、主题及查重通过不能替代领域准入。strict 命中逐条重写或按原规则有证据地复核；已确认负向硬闸不能备注放行。
+3. 先生成台账与题位表。逐题读取自己的 origin 源码，避开依赖目录。缺陷必须真实复现，不猜现象或结果。台账中记录领域准入结论、主要工作、`domain_chain`、`prompt_main_request`、反事实通用任务、受影响的数据对象/链路、带行号源码锚点和领域验收结果；领域不符或证据不足的候选先换切入点，不进入写表。
+4. 写表只调用本地 `batch_prompt_workbook.py update`；它在写入前执行领域 v2 契约、结构化困难契约、G16/G19 和原三道闸、跨项目闸。领域闸要求主动作句位于题面前半段、逐字覆盖领域输入/处理/输出/观察结果，源码锚点连续原文可回查；只在标题或末尾补业务名词、替换对象后仍是通用服务任务均不放行。禁止 `--allow-gate-failure`。`tasks.xlsx` 固定原八列，题型严格使用上表名称。
+5. 完成后全量复检领域准入、困难契约与题面副本；交接前再次核对最终题面和 requirements 的主体一致。G16/G19、主题及查重通过不能替代领域准入或 difficulty_design。strict 或困难契约命中时逐项重写；`难度复核` 备注不能放行，已确认负向硬闸不能备注放行。
 
 ```bash
 python3 <skill>/scripts/sync_platform_prompt_corpus.py
@@ -99,6 +110,8 @@ python3 <skill>/scripts/batch_prompt_workbook.py scan --parent <batch目录>
 python3 <skill>/scripts/batch_prompt_workbook.py update --parent <batch目录> --repo <任务目录>/origin --topic-map <batch目录>/repo-topic-map.json --require-topic-map --folder cc10003-01-bugfix --prompt '<最终题面>' --max-per-mode 3
 python3 <skill>/scripts/check_prompt_g16.py --parent <batch目录>
 python3 <skill>/scripts/check_prompt_g16.py --parent <batch目录> --strict
+python3 <skill>/scripts/check_difficulty_contract.py --parent <batch目录> --json
+python3 <skill>/scripts/domain_fit.py --parent <batch目录> --repo <任务目录>/origin
 python3 <skill>/scripts/check_prompt_difficulty.py --parent <batch目录>
 python3 <skill>/scripts/check_prompt_dedup.py --parent <batch目录> --include-history
 python3 <skill>/scripts/check_cross_project_prompts.py --batch-dir <batch目录> --registry <注册表> --require-registry --require-coverage --min-peer-batches 1 --require-platform-corpus
@@ -106,9 +119,10 @@ python3 <skill>/scripts/check_cross_project_prompts.py --batch-dir <batch目录>
 
 ## 4. 交接给运行侧
 
-复核每题的领域准入证据后，读 [references/handoff-schema.md](references/handoff-schema.md)，准备真实的领域/语言元数据、逐项 requirements 和可执行录屏方案。`_config/settings.json` 中镜像摘要必须来自本机真实预检，不猜另一架构的值。原 `cc-domain-task-create` 不是本批必经入口。同一基础仓库、基线和镜像的所属领域、子方向、语言/框架、Harness、Harness 版本、操作系统及环境可复现等级仅在 metadata.common 核实一次，交接生成公共档案供其余题和后续同身份批次复用，不逐题重新生成。`metadata.common` 的领域和子方向必须与 topic map 一致；交接会把该题位的 `domain_contract` 冻结进 `task.json`，运行侧按 hash 校验。公共领域字段不能免除逐题语义核验；不相符时更换题位，不靠改领域字段、挪账号或追加业务名词放行。
+复核每题的领域准入证据后，读 [references/handoff-schema.md](references/handoff-schema.md)，准备真实的领域/语言元数据、逐项 requirements、`review_contract` 和可执行录屏方案。`review_contract` 必须把每个需求映射到具体业务行为、证据类型和成功信号；测试只写真实行为映射，不写泛化总数；环境、网关、端口、进程清理和工具缺失统一列为不扣分噪声。最终题面还要写统一上下文隔离声明，禁止读取跨会话记忆或答案笔记。`_config/settings.json` 中镜像摘要必须来自本机真实预检，不猜另一架构的值。原 `cc-domain-task-create` 不是本批必经入口。同一基础仓库、基线和镜像的所属领域、子方向、语言/框架、Harness、Harness 版本、操作系统及环境可复现等级仅在 metadata.common 核实一次，交接生成公共档案供其余题和后续同身份批次复用，不逐题重新生成。`metadata.common` 的领域和子方向必须与 topic map 一致；交接会把该题位的 `domain_contract` 冻结进 `task.json`，运行侧按 hash 校验；`review_contract` 原文写入 `review-contract.json`，摘要写入 `task.json`。公共领域字段不能免除逐题语义核验；不相符时更换题位，不靠改领域字段、挪账号或追加业务名词放行。
 
 ```bash
+python3 <skill>/scripts/check_review_contract.py --parent <batch目录> --metadata <batch目录>/handoff-metadata.json --json
 python3 <skill>/scripts/prepare_handoff.py --root <root> --batch b1111-01 --metadata <batch目录>/handoff-metadata.json
 python3 <s11-feedback-run>/scripts/fbr_run.py --root <root> run --batch b1111-01
 ```

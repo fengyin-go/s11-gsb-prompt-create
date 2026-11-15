@@ -227,18 +227,19 @@ class PromptDifficultyFloorTest(unittest.TestCase):
                     f"{case['项目']}#{case['编号']} 竟然读出了硬证据：{verdict['hard_features']}",
                 )
 
-    def test_justified_note_downgrades_violation_to_trace(self) -> None:
+    def test_difficulty_note_can_no_longer_override_g16(self) -> None:
         case = DISCARDED[0]
         items = [(case["子文件夹名称"], case["任务类型"], case["提示词"])]
 
         blocked = MODULE.check(items)
-        justified = MODULE.check(
+        with_note = MODULE.check(
             items, {case["子文件夹名称"]: "难度复核: 多模块整合 + 关键设计取舍"}
         )
 
         self.assertFalse(blocked["ok"])
-        self.assertTrue(justified["ok"])
-        self.assertEqual(len(justified["justified"]), 1)
+        self.assertFalse(with_note["ok"])
+        self.assertEqual(with_note["justified"], [])
+        self.assertIn("不再具备放行效力", with_note["violations"][0]["justification_issue"])
 
     def test_bugfix_and_feature_face_the_same_floor_as_general_types(self) -> None:
         """2026-10-01 起 Bug修复 / feature迭代 与普通类型一样过 G16 困难下限。"""
@@ -277,7 +278,7 @@ class PromptDifficultyFloorTest(unittest.TestCase):
         self.assertTrue(any("硬证据" in item for item in verdict["reasons"]))
 
     def test_bugfix_two_feature_justification_cannot_bypass_floor(self) -> None:
-        """受闸类型（此处用 功能开发）的「难度复核」备注要写够项数才放行。"""
+        """旧备注即使写够特征名，也不能替代结构化困难设计。"""
         prompt = (
             "请修复库存看板上的条数与库存列表保持一致；"
             "历史记录仍按当时的判定口径保留。"
@@ -285,15 +286,15 @@ class PromptDifficultyFloorTest(unittest.TestCase):
         items = [("codegen-1", "功能开发", prompt)]
 
         blocked = MODULE.check(items, {"codegen-1": "难度复核: 多模块整合"})
-        justified = MODULE.check(
+        long_note = MODULE.check(
             items,
             {"codegen-1": "难度复核: 多模块整合 + 关键设计取舍"},
         )
 
         self.assertFalse(blocked["ok"])
         self.assertEqual(blocked["violation_count"], 1)
-        self.assertTrue(justified["ok"])
-        self.assertEqual(justified["justified"][0]["justification_feature_count"], 2)
+        self.assertFalse(long_note["ok"])
+        self.assertEqual(long_note["justified"], [])
 
     def test_bugfix_with_all_three_features_passes_without_note(self) -> None:
         prompt = (

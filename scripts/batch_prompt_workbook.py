@@ -438,7 +438,7 @@ def update_many(parent, candidates, *, repo=None, topic_map=None):
     # Batch shape/count checks run once; per-prompt admission and all-pair comparisons remain included.
     with cross_registry_lib.registry_lock(registry,timeout_seconds=float(cfg.get('lock_timeout_seconds') or 120)):
         gate=run_write_gates(parent,records,repo=repo,topic_map=topic,max_per_mode=3)
-        difficulty=check_g16([(r['子文件夹名称'],r['任务类型'],r['提示词']) for r in records],{r['子文件夹名称']:r.get('备注','') for r in records})
+        difficulty=check_g16([(r['子文件夹名称'],r['任务类型'],r['提示词']) for r in records])
         if not gate['ok'] or not difficulty['ok']:raise SystemExit('整批主题/难度/去重未通过：'+json.dumps({'gate':gate,'difficulty':difficulty},ensure_ascii=False))
         cross=run_cross_project_batch_gate(parent,cfg_path,cfg,records)
         original=path.read_bytes()
@@ -484,6 +484,7 @@ def run_write_gates(
     from check_prompt_difficulty import JUSTIFICATION_PREFIX
     from check_prompt_difficulty import check as difficulty_check
     import domain_fit
+    import difficulty_contract
     from check_repo_theme import (
         DEFAULT_MAX_PER_MODE,
         GATE_VERSION,
@@ -531,6 +532,9 @@ def run_write_gates(
     domain_errors = domain_fit.map_errors(topic_map, repo) if topic_map else []
     if topic_map:
         domain_errors += domain_fit.prompt_errors(records, topic_map)
+    difficulty_contract_errors = (
+        difficulty_contract.prompt_errors(records, topic_map, repo) if topic_map else []
+    )
     base_ledger = merge_ledgers(
         load_ledger(parent / LEDGER_FILENAME),
         load_ledger(repo_ledger_path(repo)) if repo else {},
@@ -573,12 +577,12 @@ def run_write_gates(
         items, 2,
         defect_structure=True,
         defect_labels=defect_labels,
-        justifications=justifications,
     )
     dedup = dedup_check(items, 0.2)
 
     problems: list[str] = []
     problems += [f"领域相关性未通过：{error}" for error in domain_errors]
+    problems += [f"困难设计契约未通过：{error}" for error in difficulty_contract_errors]
     pending_rows = sum(1 for record in records if not str(record.get("提示词") or "").strip())
     deferred_batch_ratios = {
         "新增能力类占比超额",
@@ -631,7 +635,16 @@ def run_write_gates(
         "ok": not problems,
         "gate_version": GATE_VERSION,
         "problems": problems,
-        "domain": {"ok": not domain_errors, "problems": domain_errors},
+        "domain": {
+            "ok": not domain_errors,
+            "gate_version": domain_fit.DOMAIN_GATE_VERSION,
+            "problems": domain_errors,
+        },
+        "difficulty_contract": {
+            "ok": not difficulty_contract_errors,
+            "version": difficulty_contract.CONTRACT_VERSION,
+            "problems": difficulty_contract_errors,
+        },
         "theme": {
             "ok": theme.get("ok"),
             "topic_policy": theme.get("topic_policy"),
@@ -685,6 +698,8 @@ def write_generation_manifest(
         "calibration": (gate.get("theme") or {}).get("calibration"),
         "review_required_labels": (gate.get("theme") or {}).get("review_required_labels"),
         "violations": gate.get("problems") or [],
+        "domain": gate.get("domain") or {},
+        "difficulty_contract": gate.get("difficulty_contract") or {},
         "cross_project": gate.get("cross_project") or {},
         "skill": skill,
     }
@@ -970,6 +985,7 @@ def update(
             "ok": gate["ok"],
             "gate_version": gate.get("gate_version"),
             "problems": gate.get("problems"),
+            "domain": gate.get("domain"),
             "module_counts": (gate.get("theme") or {}).get("module_counts"),
             "topic_policy": (gate.get("theme") or {}).get("topic_policy"),
             "topic_counts": (gate.get("theme") or {}).get("topic_counts"),

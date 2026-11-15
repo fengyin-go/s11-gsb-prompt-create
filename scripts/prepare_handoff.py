@@ -10,6 +10,8 @@ from pathlib import Path
 
 import batch_prompt_workbook as workbook
 import domain_fit
+import difficulty_contract
+import review_contract
 from create_batch_tasks import MANIFEST, git, read_json, save_json, verify_task
 import github_helpers as hub
 from repo_topic_policy import load_topic_map
@@ -24,12 +26,11 @@ def runner_lib():
     return module
 
 
-def validate_generation(parent, rows, origin):
+def validate_generation(parent, rows, origin, metadata=None):
     from check_prompt_g16 import check as g16_check
     from repo_topic_policy import load_topic_map
     prompts = [(row["子文件夹名称"], row["任务类型"], row["提示词"]) for row in rows]
-    notes = {row["子文件夹名称"]: row.get("备注", "") for row in rows}
-    if not g16_check(prompts, notes)["ok"]:
+    if not g16_check(prompts)["ok"]:
         raise ValueError("整批 G16/G19 难度闸门未通过")
     topic_map = load_topic_map(parent=parent, repo=origin, required=True,
                                expected_base_commit=git(origin, "rev-parse", "HEAD"))
@@ -37,6 +38,12 @@ def validate_generation(parent, rows, origin):
     domain_errors += domain_fit.prompt_errors(rows, topic_map)
     if domain_errors:
         raise ValueError("领域相关性闸门未通过：" + "；".join(domain_errors))
+    difficulty_errors = difficulty_contract.prompt_errors(rows, topic_map, origin)
+    if difficulty_errors:
+        raise ValueError("困难设计契约未通过：" + "；".join(difficulty_errors))
+    review_errors = review_contract.errors(rows, metadata or {})
+    if review_errors:
+        raise ValueError("验收反馈契约未通过：" + "；".join(review_errors))
     gates = workbook.run_write_gates(parent, rows, repo=origin, topic_map=topic_map, max_per_mode=3)
     if not gates["ok"]:
         raise ValueError(f"整批主题/难度/去重闸门未通过: {gates}")
@@ -69,7 +76,7 @@ def prepare(root, batch, metadata_file):
     topic_map = load_topic_map(parent=parent, repo=parent / entries[0]["task_id"] / "origin", required=True)
     topic_policy = topic_map.get("type_policy", "capacity-first")
     validate_type_counts(counts, len(rows), policy=topic_policy)
-    validate_generation(parent, rows, parent / entries[0]["task_id"] / "origin")
+    validate_generation(parent, rows, parent / entries[0]["task_id"] / "origin", meta)
     import sys
     runtime_scripts = Path(__file__).resolve().parents[2]/'s11-feedback-run/scripts'
     if str(runtime_scripts) not in sys.path: sys.path.insert(0,str(runtime_scripts))
@@ -126,13 +133,23 @@ def prepare(root, batch, metadata_file):
         initial = entry["initial_commit"]
         plan_sequence = int(entry["sequence"])
         domain_contract = domain_fit.contract_for_sequence(topic_map, plan_sequence)
+        review_contract_doc = data.get("review_contract")
+        if not isinstance(review_contract_doc, dict):
+            raise ValueError(f"{name} 缺少 review_contract")
+        review_contract_hash = __import__("hashlib").sha256(
+            json.dumps(review_contract_doc, ensure_ascii=False, sort_keys=True,
+                       separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
         record = {k: data[k] for k in ("repo_id", "domain", "subdirection", "language", "frameworks", "repro_level", "requirements")}
         record.update(common_profile={"path":str(profile_path.relative_to(root)),"sha256":__import__("hashlib").sha256(profile_path.read_bytes()).hexdigest()}, task_id=name, batch=batch, task_type=entry["task_type"], prompt=prompt,
                       difficulty=data.get("difficulty", "困难"), initial_commit=initial, base_commit=initial,
                       task_repo=entry["repo"].split("/", 1)[1], task_repo_full=entry["repo"],
                       handoff_version=2, producer="s11-gsb-prompt-create", execution_mode="single",
                       branch="main", origin=f"{name}/origin", workspace=f"{name}/workspace",
-                      domain_contract=domain_contract, domain_gate_version=1)
+                      domain_contract=domain_contract,
+                      domain_gate_version=domain_fit.DOMAIN_GATE_VERSION,
+                      review_contract=review_contract_doc,
+                      review_contract_sha256=review_contract_hash)
         for key in ("image", "image_id", "harness", "harness_version", "os"):
             record[key] = cfg[key]
         baseline = {k: record[k] for k in ("repo_id", "domain", "subdirection", "language", "frameworks", "repro_level",
@@ -151,15 +168,18 @@ def prepare(root, batch, metadata_file):
             raise ValueError(f"{name} workspace 不在干净初始提交")
         row_out = {k: record[k] for k in ("task_id", "repo_id", "initial_commit", "task_type", "difficulty", "baseline_id", "handoff_hash", "task_repo")}
         row_out.update(task_file=f"{name}/task.json", workspace=f"{name}/workspace", origin=f"{name}/origin",
+                       review_contract_file=f"{name}/review-contract.json",
                        producer=record["producer"], execution_mode="single", branch="main")
         tasks.append(row_out)
         baselines[record["baseline_id"]] = baseline
         staged.append((target, record, recording))
     batch_manifest = {"schema_version": 2, "batch_id": batch, "count": len(tasks), "tasks": tasks, "baselines": baselines,
+                      "review_contract_required": True,
                       "producer": "s11-gsb-prompt-create", "execution_mode": "single", "branch": "main"}
     for target, record, recording in staged:
         save_json(target / "task.json", record)
         save_json(target / "recording-plan.json", recording)
+        save_json(target / "review-contract.json", record["review_contract"])
         (target / "prompt.txt").write_text(record["prompt"], encoding="utf-8")
     save_json(parent / "batch-manifest.json", batch_manifest)
     for target, _, _ in staged:

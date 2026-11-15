@@ -158,6 +158,9 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
         domain_fit = raw.get("domain_fit")
         if domain_fit is not None and not isinstance(domain_fit, dict):
             raise TopicMapError(f"{where} 的 domain_fit 必须是对象")
+        difficulty_design = raw.get("difficulty_design")
+        if difficulty_design is not None and not isinstance(difficulty_design, dict):
+            raise TopicMapError(f"{where} 的 difficulty_design 必须是对象")
         task_plan.append(
             {
                 "sequence": sequence,
@@ -167,6 +170,9 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
                 "family": family,
                 "angle": str(raw.get("angle") or "").strip(),
                 "domain_fit": dict(domain_fit) if isinstance(domain_fit, dict) else None,
+                "difficulty_design": (
+                    dict(difficulty_design) if isinstance(difficulty_design, dict) else None
+                ),
             }
         )
     task_plan.sort(key=lambda item: int(item["sequence"]))
@@ -179,6 +185,7 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
         "domain": str(payload.get("domain") or "").strip(),
         "subdirection": str(payload.get("subdirection") or "").strip(),
         "base_commit": str(payload.get("base_commit") or "").strip(),
+        "difficulty_contract_version": payload.get("difficulty_contract_version"),
         "max_capacity": max_capacity,
         "topics": topics,
         "task_plan": task_plan,

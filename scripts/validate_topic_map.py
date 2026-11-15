@@ -16,6 +16,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from repo_topic_policy import TopicMapError, load_topic_map, topic_slots
 from s11_policy import validate_plan
 import domain_fit
+import difficulty_contract
 
 
 def main() -> None:
@@ -25,6 +26,11 @@ def main() -> None:
     parser.add_argument("--repo", help="原始仓库目录")
     parser.add_argument("--expected-base-commit", default="", help="要求 topic map 匹配的基准提交")
     parser.add_argument("--require-domain-fit", action="store_true", help="核对领域题位、源码依据和领域结果")
+    parser.add_argument(
+        "--require-difficulty-design",
+        action="store_true",
+        help="核对每题 H1/H2/H3 困难设计与跨模块源码依据",
+    )
     args = parser.parse_args()
 
     try:
@@ -38,6 +44,13 @@ def main() -> None:
         validate_plan(topic_map)
         if args.require_domain_fit:
             errors = domain_fit.map_errors(
+                topic_map,
+                Path(args.repo).expanduser().resolve() if args.repo else None,
+            )
+            if errors:
+                raise TopicMapError("；".join(errors))
+        if args.require_difficulty_design:
+            errors = difficulty_contract.map_errors(
                 topic_map,
                 Path(args.repo).expanduser().resolve() if args.repo else None,
             )

@@ -43,6 +43,45 @@
       "requirements": [
         {"id": "R1", "text": "与该题题面一致的需求点", "check": "操作场景、输入与预期结果；已有真实命令也可使用"}
       ],
+      "review_contract": {
+        "version": 1,
+        "business_checks": [
+          {
+            "requirement_id": "R1",
+            "behavior": "用户执行什么动作后看到哪份数据结果",
+            "evidence_kind": "http",
+            "success_signal": "可核对的状态码、数据字段或文件内容"
+          }
+        ],
+        "test_behaviors": [
+          {
+            "requirement_ids": ["R1"],
+            "selector": "测试名或稳定选择器",
+            "behavior": "该测试具体检查的业务行为"
+          }
+        ],
+        "key_business_constraint": "必须逐字出现在最终题面中的关键约束句",
+        "environment_exclusions": [
+          "dependency_install",
+          "gateway_network",
+          "port_conflict",
+          "process_cleanup",
+          "tool_availability"
+        ],
+        "model_process_focus": [
+          "只允许写入模型自身代码、验证或判断造成的失败与修正"
+        ],
+        "context_isolation": {
+          "workspace_only": true,
+          "cross_session_memory": false,
+          "answer_notes": false,
+          "prompt_statement": "只依据当前仓库、本轮题面和实际运行结果完成任务，不读取其他会话、答案笔记或历史对话缓存。"
+        },
+        "style_focus": "Feedback 用完整主谓句写业务行为、实际落差和用户可观察结果",
+        "language_terms": [
+          {"source": "内部缩写", "public": "用户能理解的动作或字段"}
+        ]
+      },
       "recording_plan": {
         "setup_cmd": "make setup",
         "demo": [{"cmd": "真实演示命令", "show": "该需求的可观察结果"}],
@@ -65,8 +104,19 @@
 
 同一批的代表性 smoke 可引用同份证据，但该证据须涵盖本批技术栈、依赖来源和运行环境，不能只写 true。容器架构与宿主不同或依赖含 native 组件时，实际运行环境必须另验证，不能从宿主启动成功推断容器成功。
 
-`prepare_handoff.py` 不执行参考解、不调用模型。它从 tasks.xlsx 原样取题面，从仓库清单取 GitHub 地址和初始提交，并再次运行领域题位闸。输出使用 `producer=s11-gsb-prompt-create`、`execution_mode=single`、`branch=main`，把每个题位的 `domain_contract`（domain、subdirection、topic、主任务、领域结果、源码依据、pass 结论）冻结进 `task.json`，同时把 producer/execution_mode/branch、origin/workspace 路径和领域契约纳入 hash 与批次清单。运行侧会拒绝 A/B 目录、错误分支、错误路径、领域契约不一致和输入漂移。
+`prepare_handoff.py` 不执行参考解、不调用模型。它从 tasks.xlsx 原样取题面，从仓库清单取 GitHub 地址和初始提交，并再次运行领域题位闸。输出使用 `producer=s11-gsb-prompt-create`、`execution_mode=single`、`branch=main`，把每个题位的 v2 `domain_contract`（domain、subdirection、topic、主任务、领域结果、`domain_chain`、前置 `prompt_main_request`、带行号源码锚点、反事实通用任务、pass 结论）冻结进 `task.json`，同时把 producer/execution_mode/branch、origin/workspace 路径和领域契约纳入 hash 与批次清单。运行侧会拒绝 A/B 目录、错误分支、错误路径、旧版或字段不全的 v2 领域契约以及输入漂移。
+
+新批次 `batch-manifest.json` 必须带 `review_contract_required: true`。运行侧加载任务时，
+若清单要求契约但 `task.json.review_contract` 缺失、`review-contract.json` 内容不一致或摘要不符，
+直接拒绝交接。
 
 origin 始终保留初始提交与依赖，workspace 只克隆已提交的源码，起跑时没有缓存或被忽略文件。初始地址固定 `/commit/<SHA>`；产物后续推到 main，不增设其他分支。
 
 requirements.check 是供验收者阅读的核对方法，可为自然语言，不要求命令。不得倒推题面，强迫实现方创建指定测试文件来填此字段。recording_plan.demo.cmd 会被运行侧实际执行，只能使用真实入口；若功能尚未实现，先记录已有构建/启动演示并明确其仅覆盖基础检查，将业务场景留在 requirements 中，notes 标明业务演示待按实际产物补齐。不得把基础检查视频当成功能验收证据，也不得写入不存在的未来脚本。正式业务录制前，运行侧应根据实际产物更新计划并同步交接哈希。
+
+`review_contract` 是必填的反馈生产契约。`business_checks` 必须覆盖全部 requirements；每个 check
+要写清业务行为、证据类型和成功信号。`test_behaviors` 只登记真实测试与需求的映射，不能只写
+“15 个测试通过”。环境依赖安装、网关、端口、进程清理和工具缺失统一列入排除项，不能作为模型
+扣分依据。`context_isolation.prompt_statement` 必须逐字进入最终题面，禁止读取跨会话记忆或答案
+笔记。`prepare_handoff.py` 会运行该契约，并把契约原文保存到每个任务的
+`review-contract.json`，同时在 `task.json` 写入内容摘要。

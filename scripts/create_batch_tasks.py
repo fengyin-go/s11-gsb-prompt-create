@@ -11,6 +11,7 @@ from pathlib import Path
 
 import batch_prompt_workbook as workbook
 import domain_fit
+import difficulty_contract
 import github_helpers as hub
 from check_repo_theme import compute_capacity, derive_repo_modules, derivation_health
 from repo_topic_policy import load_topic_map
@@ -143,6 +144,9 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
     domain_errors = domain_fit.map_errors(topic_map, source)
     if domain_errors:
         raise ValueError("领域题位契约未通过：" + "；".join(domain_errors))
+    difficulty_errors = difficulty_contract.map_errors(topic_map, source)
+    if difficulty_errors:
+        raise ValueError("困难设计契约未通过：" + "；".join(difficulty_errors))
     if topic_map.get("base_commit") != commit:
         raise ValueError("topic map 必须明确绑定最终基准提交")
     counts = validate_plan(topic_map)

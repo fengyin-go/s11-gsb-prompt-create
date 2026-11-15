@@ -40,6 +40,12 @@ class SingleFlow(unittest.TestCase):
         (self.source / "src").mkdir()
         for name in ("orders", "accounts", "search", "exports", "invoices"):
             (self.source / "src" / f"{name}.py").write_text(f"def {name}():\n    return []\n")
+        (self.source / "src/orders.py").write_text(
+            "def orders(records):\n"
+            "    # 解析订单数据并生成订单数据集\n"
+            "    return records\n",
+            encoding="utf-8",
+        )
         (self.source / ".gitignore").write_text("node_modules/\n")
         (self.source / "Makefile").write_text("setup:\n\t@true\ntest:\n\t@true\n")
         sh(self.source, "add", "-A")
@@ -51,13 +57,94 @@ class SingleFlow(unittest.TestCase):
         self.remote_repos = {}
         self.topic = {"version": 1, "profile": "gsb-semantic-v2", "base_commit": self.commit,
                       "domain": "测试领域", "subdirection": "测试方向",
+                      "difficulty_contract_version": 1,
                       "max_capacity": 1, "topics": [{"id": "orders", "name": "订单", "module": "orders",
                         "keywords": ["订单", "订单项"], "evidence": ["src/orders.py"],
                         "domain_objects": ["订单"], "domain_results": ["导出"], "seat_capacity": 1}],
                       "task_plan": [{"sequence": 1, "slug": "development", "task_type": "功能开发",
                                      "topic": "orders", "family": "新增能力", "angle": "订单导出",
-                                     "domain_fit": {"main_task": "新增订单导出", "business_result": "导出订单",
-                                                    "source_evidence": ["src/orders.py"], "conclusion": "pass"}}]}
+                                     "difficulty_design": {
+                                         "version": 1,
+                                         "reasoning_challenge": {
+                                             "constraints": [
+                                                 {"kind": "transaction_consistency",
+                                                  "statement": "订单数据与来源批次必须同时可见",
+                                                  "failure_if_omitted": "下游会读到没有来源的数据"},
+                                                 {"kind": "failure_recovery",
+                                                  "statement": "导出失败后只能补写缺失记录",
+                                                  "failure_if_omitted": "重试会覆盖上一份完整数据"},
+                                             ],
+                                             "why_interact": "来源批次决定恢复位置，恢复范围又决定下游可见版本。",
+                                             "prompt_excerpt": "导出订单数据集。",
+                                         },
+                                         "module_integration": {
+                                             "primary_module": "orders",
+                                             "secondary_modules": [{
+                                                 "name": "exports",
+                                                 "role": "consumer",
+                                                 "artifact": "订单数据集",
+                                                 "relationship": "导出模块读取同一份订单数据集",
+                                             }],
+                                             "data_artifact": "订单数据集",
+                                             "prompt_excerpt": "导出订单数据集。",
+                                         },
+                                         "design_tradeoff": {
+                                             "decision": "恢复边界采用采集时间还是业务时间",
+                                             "options": ["采集时间", "业务时间"],
+                                             "outcome_invariant": "下游只能看到完整订单数据集",
+                                             "why_open": "题面只固定可观察结果，不选择内部时间键。",
+                                             "implementation_not_prescribed": True,
+                                             "prompt_excerpt": "导出订单数据集。",
+                                         },
+                                         "medium_counterexample": {
+                                             "generic_task": "给订单列表增加一个导出按钮",
+                                             "why_medium": "仅增加局部按钮，没有数据版本和恢复约束",
+                                         },
+                                         "hard_evidence": ["事务与落库一致性", "断点续做与失败链路"],
+                                         "anti_patterns": {
+                                             "single_surface_only": False,
+                                             "secondary_observation_only": False,
+                                             "solution_prescribed": False,
+                                             "single_constraint": False,
+                                             "hard_evidence_tail_only": False,
+                                             "example_data_only": False,
+                                             "cross_call_merge_only": False,
+                                         },
+                                         "module_anchors": [
+                                             {"path": "src/orders.py", "start_line": 2, "end_line": 2,
+                                              "module": "orders", "supports": "primary",
+                                              "excerpt": "解析订单数据并生成订单数据集"},
+                                             {"path": "src/exports.py", "start_line": 1, "end_line": 1,
+                                              "module": "exports", "supports": "secondary",
+                                              "excerpt": "def exports():"},
+                                         ],
+                                     },
+                                     "domain_fit": {
+                                         "version": 2,
+                                         "main_task": "解析订单数据并生成订单数据集",
+                                         "business_result": "导出订单数据集",
+                                         "domain_chain": {
+                                             "input": "订单数据",
+                                             "operation": "解析订单数据",
+                                             "output": "订单数据集",
+                                             "observable": "导出订单数据集",
+                                         },
+                                         "prompt_main_request": "请解析订单数据并导出订单数据集。",
+                                         "genericization": {
+                                             "rewritten_with_generic_objects": "升级构建工具并调整路由配置",
+                                             "same_task_without_domain_semantics": False,
+                                         },
+                                         "source_evidence": ["src/orders.py"],
+                                         "domain_anchors": [
+                                             {"path": "src/orders.py", "start_line": 2, "end_line": 2,
+                                              "supports": "operation",
+                                              "excerpt": "解析订单数据并生成订单数据集"},
+                                             {"path": "src/orders.py", "start_line": 2, "end_line": 2,
+                                              "supports": "output",
+                                              "excerpt": "解析订单数据并生成订单数据集"},
+                                         ],
+                                         "conclusion": "pass",
+                                     }}]}
         create.save_json(self.parent / "repo-topic-map.json", self.topic)
         create.save_json(self.parent / "startup-preflight.json", {"startup_ok": True, "cleaned_up": True,
             "baseline_push_ok": True, "dependency_ignored": True, "dependency_paths": [],
@@ -200,6 +287,10 @@ class SingleFlow(unittest.TestCase):
         metadata = {"common": {"repo_id": "orders-test", "domain": "测试领域", "subdirection": "测试方向",
                               "language": "Python", "frameworks": "stdlib", "repro_level": "已容器化，可一键起环境"},
                     "tasks": {task.name: {"requirements": [{"id": "R1", "text": "订单导出", "check": "make test"}],
+                       "review_contract": {"version": 1, "business_checks": [], "test_behaviors": [],
+                                           "key_business_constraint": "", "environment_exclusions": [],
+                                           "model_process_focus": [], "context_isolation": {},
+                                           "style_focus": "", "language_terms": []},
                        "recording_plan": {"setup_cmd": "make setup", "demo": [{"cmd": "make test", "show": "ok"}]},
                        "dependency_smoke": {"ok": True, "commit": self.commit, "command": "make test",
                                             "evidence": "fixture log", "cleaned_up": True}}}}

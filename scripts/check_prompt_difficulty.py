@@ -44,8 +44,7 @@ DEFAULT_MIN_HITS = 2
 # 批量流程只跑了 Bugfix 这一类，题面再简单也不会进闸门，最后被平台按 P3 判废弃。
 DEFAULT_TASK_TYPES = "all"
 ALL_TASK_TYPES = {"all", "全部", "*"}
-# 备注里写清「难度复核: …」的条目视为人工复核过；平台按语义判难度，脚本只能做筛选，
-# 命中两项时要么换角度重出，要么把这道题为什么不算简单的依据写进备注留档。
+# 历史备注前缀仅用于兼容读取；新流程不再允许备注覆盖拒收结论。
 JUSTIFICATION_PREFIX = "难度复核"
 # 单独命中也要拒的特征：改动收在一处判断、一个文件或一段文案里，是最典型的「过于简单」。
 # 平台 P3 判词（cc-6600009 的 41 号）里「修改范围」就是其中一条依据：只改一处判断的题
@@ -414,6 +413,7 @@ def check(
     defect_structure: bool = True,
     defect_labels: set[str] | None = None,
     justifications: dict[str, str] | None = None,
+    notes_can_override: bool = False,
 ) -> dict[str, object]:
     justifications = justifications or {}
     results: list[dict[str, object]] = []
@@ -443,31 +443,17 @@ def check(
             )
             hard = True
         if hit_count >= min_hits:
-            if note:
+            if note and notes_can_override:
                 justified.append({
                     "label": label,
                     "hit_count": hit_count,
                     "hits": verdict["hits"],
                     "note": note,
                 })
-            elif not applies:
-                # 2026-09-16 改：难度词面检查只对Bugfix题硬拦。功能开发与功能优化题里
-                # 这套词面口径命中率过高（cc-6600011 那批 49 条里 35 条命中），
-                # 当硬闸会把大量平台放行的题挡在门外；这几类改成列进 needs_review，
-                # 由出题人逐条复核并写「难度复核: …」留档，复核结论进台账。
-                needs_review.append({
-                    "label": label,
-                    "hit_count": hit_count,
-                    "hits": verdict["hits"],
-                    "evidence": verdict["evidence"],
-                    "hard_signal": bool(reject_traits),
-                    "note": "复核后把依据写进工作簿备注，以「难度复核: 」开头",
-                })
             else:
                 reasons.append(
                     f"命中 {hit_count} 项「过于简单」特征（上限 {min_hits - 1} 项）："
-                    "要么换角度重出，要么把这道题不算简单的依据写进工作簿备注，"
-                    f"并以「{JUSTIFICATION_PREFIX}: 」开头留档"
+                    "必须换角度重出，旧的「难度复核」备注不再具备放行效力"
                 )
         if structure is not None and not structure["ok"]:
             missing: list[str] = []
@@ -509,8 +495,8 @@ def check(
         "items": results,
         "notes": [
             "本脚本是词面兜底检查，通过不代表题目一定够难，生成方还必须按手册的难度下限自查。",
-            "命中两项及以上时要么换角度重出，要么把「为什么这道题不算简单」写进工作簿备注并"
-            f"以「{JUSTIFICATION_PREFIX}: 」开头；只改同义词、只加限定词不算通过。",
+            "命中两项及以上时必须换角度重出；旧的「难度复核」备注不再具备放行效力，"
+            "只改同义词或补形容词也不算通过。",
             "难度默认按全部任务类型检查；只跑Bugfix会漏掉功能开发与功能优化里的单点题。",
         ],
     }

@@ -102,8 +102,7 @@ BUGFIX_MIN_FEATURES = JUDGE.BUGFIX_MIN_FEATURES
 FEATURE_NAMES = JUDGE.FEATURE_KEYS
 HARD_EVIDENCE_KEYS = JUDGE.HARD_EVIDENCE_KEYS
 HELL_MIN_FEATURES = JUDGE.MIN_HELL_FEATURES
-# 备注里写清「难度复核: …」的条目视为逐条复核过：平台判难度是语义口径，脚本只能做兜底
-# 筛选；确实判断这条题能到 `困难` 时，把要求成立的特征逐项写进备注留档。
+# 历史备注前缀仍保留用于兼容读取，但默认不再具备任何放行效力。
 JUSTIFICATION_PREFIX = "难度复核"
 
 RULE_G16 = "GSB 规则 G16 · 题目难度达不到「困难」"
@@ -137,7 +136,7 @@ POLICY_HARD_FLOOR = "hard-floor"
 # 复核；默认只提示、不拦，但下面另行维护平台真实回执已经确认的 UI-only 硬拦形状。
 MEDIUM_FLOOR_FEATURES = ("调用与数据流理解", "实现决策", "边界条件与约束")
 MEDIUM_FLOOR_REQUIRED = len(MEDIUM_FLOOR_FEATURES)
-# 「难度复核」备注里能数出来的特征名：困难三项 + G19 的三项中等特征（迭代 / 修复题）。
+# 历史备注里可识别的特征名，仅用于解释旧回执，不用于放行。
 NOTE_FEATURE_NAMES = tuple(FEATURE_NAMES) + tuple(MEDIUM_FLOOR_FEATURES)
 MEDIUM_FLOOR_PATTERNS = {
     "调用与数据流理解": [
@@ -505,6 +504,7 @@ def check(
     justifications: dict[str, str] | None = None,
     *,
     strict: bool = False,
+    notes_can_override: bool = False,
 ) -> dict:
     justifications = justifications or {}
     rows: list[dict] = []
@@ -536,12 +536,22 @@ def check(
             row["justification_feature_count"] = justification_count
             row["note_required_features"] = required
             platform_hard = bool(row.get("platform_learned_blocks"))
-            if note and justification_count >= required and not platform_hard:
+            if (
+                notes_can_override
+                and note
+                and justification_count >= required
+                and not platform_hard
+            ):
                 justified.append({**row, "note": note})
             else:
                 if note and platform_hard:
                     row["justification_issue"] = (
                         "命中平台真实回执提炼出的负向硬闸，不能用「难度复核」备注放行"
+                    )
+                elif note and not notes_can_override:
+                    row["justification_issue"] = (
+                        "难度复核备注不再具备放行效力；必须重写题面或更换题位，"
+                        "并用结构化 difficulty_design 证明 H1/H2/H3"
                     )
                 elif note:
                     row["justification_issue"] = (
@@ -609,9 +619,8 @@ def check(
             "G18（不在本脚本硬判范围）：当日两侧满分占比超过 10% 会整批判废；难度不够时"
             "A / B 两侧都容易拿满分，把题面做成跨模块的困难题是压低这条的主要手段。",
             "本条闸门命中即作废、不可返修，必须在出题阶段就换切入点重出，不许事后改措辞。",
-            f"确实判断这条题能到「困难」时，把要求成立的特征逐项写进工作簿备注并以"
-            f"「{JUSTIFICATION_PREFIX}: 」开头留档（普通类型写两项、Bugfix写三项，"
-            f"G19 的三项中等特征名也算数）。脚本命中但备注复核过的条目只留痕、不拦。",
+            "「难度复核」备注不再具备放行效力。命中 G16/G19 后必须重写题面或更换题位，"
+            "并提供结构化 difficulty_design，逐项证明 H1/H2/H3 及源码依据。",
         ],
     }
 

@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "captured_at": "2026-11-15",
+  "batch": "b1113-01",
+  "summary": {
+    "total": 39,
+    "difficulty_discarded": 13,
+    "pending_fix": 8,
+    "repaired_feedback": 6,
+    "unresolved_trace_memory": 2
+  },
+  "cases": [
+    {
+      "task_id": "dfzr10007-03-optimization",
+      "platform_record_id": 6111,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H1",
+        "H2",
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H1 硬推理约束（复杂状态 / 兼容性 / 权限 / 并发 / 性能 / 异常链路）\n· H2 多模块整合（两个以上模块协同，一处变化驱动另一处）\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-06-development",
+      "platform_record_id": 6115,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H1"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H1 硬推理约束（复杂状态 / 兼容性 / 权限 / 并发 / 性能 / 异常链路）\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-07-optimization",
+      "platform_record_id": 6116,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H1",
+        "H2",
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H1 硬推理约束（复杂状态 / 兼容性 / 权限 / 并发 / 性能 / 异常链路）\n· H2 多模块整合（两个以上模块协同，一处变化驱动另一处）\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-08-bugfix",
+      "platform_record_id": 6117,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n题面里能找到的硬约束：状态与并发「同一归档动作再次到达时不生成第二个时间戳」；兼容与迁移「缺失成员不得用当前值回填」\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-10-development",
+      "platform_record_id": 6119,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n题面里能找到的硬约束：状态与并发「失败行还会覆盖上一批结论」\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-11-optimization",
+      "platform_record_id": 6121,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H1",
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H1 硬推理约束（复杂状态 / 兼容性 / 权限 / 并发 / 性能 / 异常链路）\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-15-optimization",
+      "platform_record_id": 6133,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H1",
+        "H2",
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H1 硬推理约束（复杂状态 / 兼容性 / 权限 / 并发 / 性能 / 异常链路）\n· H2 多模块整合（两个以上模块协同，一处变化驱动另一处）\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-20-migration",
+      "platform_record_id": 6142,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n题面里能找到的硬约束：兼容与迁移「确认输入源、转换步骤、依赖关系和输出目标一致后再切换读取入口」；状态与并发「缺失字段进入待处理清单」；状态与并发「成功后旧包保留一个版本」\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-21-development",
+      "platform_record_id": 6144,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H1"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H1 硬推理约束（复杂状态 / 兼容性 / 权限 / 并发 / 性能 / 异常链路）\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-23-development",
+      "platform_record_id": 6148,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H1",
+        "H2",
+        "H3"
+      ],
+      "summary": "命中题目规则 P4（题目难度达不到「困难」）：本期所有任务类型只收「困难」「地狱」，本题题面判定的真实难度为「中等」（需要读懂现有采样调用链，定位种子和分层字段所在环节，并保证同一配置可复现、缺失字段可定位，属于理解跨环节数据流，但没有架构取舍或复杂状态。），且「困难」的三项特征 —— 多模块整合、关键设计取舍、复杂技术关注点 —— 一项都没有体现。\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道需要整合多个模块、做关键设计取舍，或处理复杂状态、兼容性、权限、并发、性能、异常链路等问题的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-27-development",
+      "platform_record_id": 6155,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n题面里能找到的硬约束：状态与并发「同一任务重复开始沿用已生成文件，打包中断从缺失分段继续」\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-29-optimization",
+      "platform_record_id": 6157,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H2",
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H2 多模块整合（两个以上模块协同，一处变化驱动另一处）\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n题面里能找到的硬约束：状态与并发「第二段校验和不匹配时保留第一段 checksum，重启从第三段续写」；状态与并发「页码 2 的段清单定位进度时不触发重新导出」\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-37-optimization",
+      "platform_record_id": 6166,
+      "category": "difficulty_discarded",
+      "platform_status": "DISCARDED",
+      "failed_check": "trace_complexity_floor",
+      "missing_features": [
+        "H1",
+        "H2",
+        "H3"
+      ],
+      "summary": "命中题目规则 P5（题目难度达不到「困难」）：本期只收「困难」「地狱」，本题对照「困难」的定义 —— 需要整合多个模块/系统约束，做关键设计取舍，处理复杂状态、兼容性、权限、并发、性能或异常链路 —— 缺少：\n· H1 硬推理约束（复杂状态 / 兼容性 / 权限 / 并发 / 性能 / 异常链路）\n· H2 多模块整合（两个以上模块协同，一处变化驱动另一处）\n· H3 关键设计取舍（多种可行方案，选择影响正确性）\n该条数据作废，不可返修：难度是题目本身的属性，改写措辞或调高难度字段都无效。请换一道正确性依赖复杂状态、并发、兼容迁移、权限边界或异常链路，且需要多个模块协同或关键设计取舍的题目重新出题。"
+    },
+    {
+      "task_id": "dfzr10007-05-bugfix",
+      "platform_record_id": 6114,
+      "category": "feedback_wrong_attribution",
+      "platform_status": "QC_PASSED",
+      "failed_check": "Feedback · 把环境或界面问题当评价依据",
+      "summary": "环境缺少兼容包和服务重启 144 被当成扣分依据",
+      "disposition": "repaired_qc_passed"
+    },
+    {
+      "task_id": "dfzr10007-12-development",
+      "platform_record_id": 6123,
+      "category": "feedback_wrong_attribution",
+      "platform_status": "QC_PASSED",
+      "failed_check": "Feedback · 把环境或界面问题当评价依据",
+      "summary": "接口检查缺少兼容包和收尾命令 144 被当成扣分依据",
+      "disposition": "repaired_qc_passed"
+    },
+    {
+      "task_id": "dfzr10007-19-bugfix",
+      "platform_record_id": 6141,
+      "category": "feedback_telegraph",
+      "platform_status": "QC_PASSED",
+      "failed_check": "描述规则 8b · Feedback 电报体打分",
+      "summary": "刷新记录位置和服务重启用命令等压缩短语需要回读",
+      "disposition": "repaired_qc_passed"
+    },
+    {
+      "task_id": "dfzr10007-22-optimization",
+      "platform_record_id": 6146,
+      "category": "feedback_telegraph",
+      "platform_status": "QC_PASSED",
+      "failed_check": "描述规则 8b · Feedback 电报体打分",
+      "summary": "并发缺陷和修复过程压缩成速记",
+      "disposition": "repaired_qc_passed"
+    },
+    {
+      "task_id": "dfzr10007-25-bugfix",
+      "platform_record_id": 6152,
+      "category": "feedback_generic_test",
+      "platform_status": "QC_PASSED",
+      "failed_check": "Feedback · 测试结论没有落到这道题",
+      "summary": "只报 15 个测试通过，没有说明覆盖哪些业务行为",
+      "disposition": "repaired_qc_passed"
+    },
+    {
+      "task_id": "dfzr10007-36-refactor",
+      "platform_record_id": 6165,
+      "category": "feedback_generic_test",
+      "platform_status": "QC_PASSED",
+      "failed_check": "Feedback · 测试结论没有落到这道题",
+      "summary": "只写后端回归和前端类型检查通过，没有业务行为",
+      "disposition": "repaired_qc_passed"
+    },
+    {
+      "task_id": "dfzr10007-28-bugfix",
+      "platform_record_id": 6156,
+      "category": "trace_memory",
+      "platform_status": "PENDING_FIX",
+      "failed_check": "严禁 memory 作弊",
+      "summary": "读取跨会话记忆库/答案笔记后照样改代码",
+      "disposition": "pending_rerun"
+    },
+    {
+      "task_id": "dfzr10007-31-optimization",
+      "platform_record_id": 6159,
+      "category": "trace_memory",
+      "platform_status": "PENDING_FIX",
+      "failed_check": "严禁 memory 作弊",
+      "summary": "读取跨会话记忆库/答案笔记后照样改代码",
+      "disposition": "pending_rerun"
+    }
+  ]
+}
