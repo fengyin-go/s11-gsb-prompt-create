@@ -35,14 +35,27 @@ def run_gh(args: list[str]) -> subprocess.CompletedProcess[str]:
     # Only retry explicit throttling, never permission/name/conflict failures.
     deadline = time.monotonic() + int(os.environ.get("S11_GITHUB_RETRY_BUDGET_SECONDS", "7200"))
     attempt = 0
+    transient_attempt = 0
     while True:
         result = run_cmd([gh_binary(), *args])
         message = (result.stderr + "\n" + result.stdout).lower()
         limited = any(word in message for word in (
             "rate limit", "secondary rate", "abuse detection", "http 429", "too many requests",
             "created too many repositories", "too quickly. please try again later"))
-        if result.returncode == 0 or not limited:
+        transient = any(word in message for word in (
+            "tls handshake timeout", "connection reset", "timeout awaiting response",
+            "http2 framing", "temporary failure", "i/o timeout", "network is unreachable"))
+        if result.returncode == 0 or (not limited and not transient):
             return result
+        if transient and not limited:
+            if transient_attempt >= 5:
+                return result
+            delay = min(2 * 2 ** transient_attempt, 30)
+            print(f"GitHub 网络短暂失败：{delay} 秒后重试（第 {transient_attempt + 1} 次）",
+                  file=sys.stderr, flush=True)
+            time.sleep(delay)
+            transient_attempt += 1
+            continue
         delay = min(60 * 2 ** min(attempt, 4), 900)
         hint = re.search(r"retry[- ]after[: =]+(\d+)", message)
         if hint:

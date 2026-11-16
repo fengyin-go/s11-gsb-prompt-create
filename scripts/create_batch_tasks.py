@@ -13,6 +13,7 @@ import batch_prompt_workbook as workbook
 import domain_fit
 import difficulty_contract
 import github_helpers as hub
+import create_source_snapshot as source_snapshot
 from check_repo_theme import compute_capacity, derive_repo_modules, derivation_health
 from repo_topic_policy import load_topic_map
 from s11_policy import TYPE_WEIGHTS, validate_plan
@@ -106,13 +107,25 @@ def verify_task(target, entry, *, remote=True, workspace_required=False):
     return problems
 
 
-def validate_preflight(path, source, commit):
+def validate_preflight(path, source, commit, snapshot=None):
     evidence = read_json(path)
-    required_true = ("startup_ok", "cleaned_up", "baseline_push_ok", "dependency_ignored")
+    required_true = (
+        ("startup_ok", "cleaned_up", "dependency_ignored")
+        if snapshot else
+        ("startup_ok", "cleaned_up", "baseline_push_ok", "dependency_ignored")
+    )
     if any(evidence.get(k) is not True for k in required_true):
-        raise ValueError("启动、清理、基线推送或依赖忽略证据未通过")
+        label = "启动、清理或依赖忽略" if snapshot else "启动、清理、基线推送或依赖忽略"
+        raise ValueError(f"{label}证据未通过")
     if evidence.get("startup_commit") != commit or evidence.get("baseline_commit") != commit:
         raise ValueError("预检证据不属于最终基准提交")
+    if snapshot:
+        if evidence.get("source_mode") != "directory_snapshot":
+            raise ValueError("本地快照模式预检必须填写 source_mode=directory_snapshot")
+        if evidence.get("snapshot_commit") != commit:
+            raise ValueError("预检 snapshot_commit 与冻结快照不一致")
+        if evidence.get("snapshot_id") != snapshot.get("snapshot_id"):
+            raise ValueError("预检 snapshot_id 与源码快照清单不一致")
     if not evidence.get("startup_command") or not evidence.get("startup_evidence"):
         raise ValueError("预检缺少启动命令或就绪证据")
     for rel in evidence.get("dependency_paths", []):
@@ -129,16 +142,21 @@ def validate_preflight(path, source, commit):
 
 
 def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_run=False,
-                 verify=False, start_index=1, visibility="public"):
+                 verify=False, start_index=1, visibility="public", snapshot_manifest=None):
     source, parent = Path(source).resolve(), Path(parent).resolve()
+    snapshot = (
+        source_snapshot.validate_snapshot(source, snapshot_manifest)
+        if snapshot_manifest else None
+    )
     commit = git(source, "rev-parse", "HEAD")
     if git(source, "status", "--porcelain"):
         raise ValueError("原始仓库有未提交改动；请先使用基准提交的干净克隆")
     if not 1 <= start_index <= 999999:
         raise ValueError("start-index 必须在 1..999999")
-    remote = hub.source_remote_url(source)
+    remote = None if snapshot else hub.source_remote_url(source)
     owner = hub.resolve_repository_owner(owner)
-    base_repo_name = source_repo_name(remote)
+    source_reference = snapshot["snapshot_id"] if snapshot else remote
+    base_repo_name = snapshot["source_name"] if snapshot else source_repo_name(remote)
     topic_map = load_topic_map(repo=source, parent=parent, explicit=topic_path,
                               required=True, expected_base_commit=commit)
     domain_errors = domain_fit.map_errors(topic_map, source)
@@ -161,10 +179,11 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
     if not verify:
         if not preflight:
             raise ValueError("需要 --preflight 真实启动证据，不接受跳过启动预检")
-        evidence = validate_preflight(preflight, source, commit)
-        heads = hub.remote_heads(remote)
-        if commit not in heads.values():
-            raise ValueError("最终基准提交没有出现在原始仓库远端分支")
+        evidence = validate_preflight(preflight, source, commit, snapshot=snapshot)
+        if snapshot is None:
+            heads = hub.remote_heads(remote)
+            if commit not in heads.values():
+                raise ValueError("最终基准提交没有出现在原始仓库远端分支")
     old = read_json(parent / MANIFEST) if (parent / MANIFEST).is_file() else {"tasks": []}
     known = {item["folder"]: item for item in old["tasks"]}
     # A batch started before directory naming changed must retain every frozen ID.
@@ -176,8 +195,22 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
     if set(known) - planned_names:
         raise ValueError("新计划遗漏既有任务或 start-index 已变；保留原任务编号和计划后再追加")
     journal_path=parent/'creation-journal.json'
-    journal=read_json(journal_path) if journal_path.is_file() else {'source_repo':remote,'base_commit':commit,'tasks':{}}
-    if journal.get('source_repo')!=remote or journal.get('base_commit')!=commit:raise ValueError('建仓恢复日志不属于当前基线')
+    journal=read_json(journal_path) if journal_path.is_file() else {'source_repo':source_reference,'base_commit':commit,'tasks':{}}
+    if journal.get('source_repo')!=source_reference or journal.get('base_commit')!=commit:raise ValueError('建仓恢复日志不属于当前基线')
+    source_manifest_fields = {
+        "source_repo": source_reference,
+        "base_commit": commit,
+        "source_mode": "directory_snapshot" if snapshot else "git_remote",
+    }
+    if snapshot:
+        source_manifest_fields.update({
+            "source_name": snapshot["source_name"],
+            "source_dir": snapshot["source_dir"],
+            "snapshot_manifest": str(Path(snapshot_manifest).expanduser().resolve()),
+            "snapshot_id": snapshot["snapshot_id"],
+            "snapshot_tree": snapshot["snapshot_tree"],
+            "snapshot_file_count": snapshot["file_count"],
+        })
     tasks, failed, created, skipped = [], [], [], []
     for item in topic_map["task_plan"]:
         number = start_index + item["sequence"] - 1
@@ -268,8 +301,12 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
                 save_json(target / "task-seed.json", entry)
                 # Persist each completed task so a failed later task is safely resumable.
                 known[folder] = entry
-                save_json(parent / MANIFEST, {"schema_version": 1, "source_repo": remote,
-                          "base_commit": commit, "branch": "main", "tasks": list(known.values())})
+                save_json(parent / MANIFEST, {
+                    "schema_version": 1,
+                    **source_manifest_fields,
+                    "branch": "main",
+                    "tasks": list(known.values()),
+                })
             created.append(entry)
         tasks.append(entry)
     if not dry_run and not verify:
@@ -297,6 +334,8 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             "type_counts": counts, "type_weights": TYPE_WEIGHTS, "capacity": capacity,
             "structure": "origin + workspace", "branches": ["main"], "tasks": tasks,
             "workbook": str(parent / "tasks.xlsx"), "preflight": evidence,
+            "source_mode": source_manifest_fields["source_mode"],
+            "source_name": base_repo_name,
             "next_step": "复制依赖后做无安装启动 smoke；生成提示词；prepare_handoff.py 交接"}
 
 
@@ -304,6 +343,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parent", required=True, help="<root>/batches/<batch>")
     parser.add_argument("--source", required=True)
+    parser.add_argument(
+        "--snapshot-manifest",
+        help="本地目录快照清单；提供后跳过原仓库 origin 远端与 baseline_push_ok 要求",
+    )
     parser.add_argument("--topic-map", required=True)
     parser.add_argument("--preflight")
     parser.add_argument("--owner")
@@ -315,7 +358,8 @@ def main():
     try:
         result = create_batch(args.parent, args.source, args.topic_map, preflight=args.preflight,
                               owner=args.owner, dry_run=args.dry_run, verify=args.verify,
-                              start_index=args.start_index, visibility=args.visibility)
+                              start_index=args.start_index, visibility=args.visibility,
+                              snapshot_manifest=args.snapshot_manifest)
     except (ValueError, OSError, RuntimeError) as exc:
         result = {"ok": False, "blocking_reason": str(exc)}
     print(json.dumps(result, ensure_ascii=False, indent=2))

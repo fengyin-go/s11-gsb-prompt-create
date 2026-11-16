@@ -62,6 +62,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import batch_prompt_workbook as workbook_lib  # noqa: E402
+import review_contract  # noqa: E402
 from repo_topic_policy import (  # noqa: E402
     detect_topic,
     load_topic_map,
@@ -75,6 +76,10 @@ LEDGER_FILENAME = "repo-theme-ledger.json"
 FEATURE_POINTS_FILENAME = "repo-feature-points.json"
 CAPACITY_FILENAME = "repo-capacity.json"
 MANIFEST_FILENAME = "prompt-generation-manifest.json"
+CHOICE_TEMPLATE_RE = re.compile(
+    r"(?:，|时)(?:由你|请自行|哪份结果|哪一版|优先级由你|采用哪一份|先后顺序|最终选择|最终采用)"
+    r"[^；。]*(?=；|。)"
+)
 DEFAULT_MAX_PER_MODULE = 3
 # 单仓库条数上限：平台是在同一个仓库里两两比，铺得越多最近邻越近。
 # 2026-09-16 复盘两个历史批次（48/49 条同仓库，废弃 44%/35%）后定 35；
@@ -561,6 +566,13 @@ def classify(
     exempt: bool = False,
     topic_map: dict | None = None,
 ) -> dict[str, object]:
+    # The review contract requires one identical isolation sentence in every
+    # prompt. It is boilerplate, not a business clause, so it must not dominate
+    # the batch-level fingerprint or demand-mode classifier.
+    text = str(text or "").replace(review_contract.CONTEXT_STATEMENT, "").strip()
+    # H3 likewise requires an explicit open-choice clause in every prompt.
+    # Compare the surrounding business axis, not the mandatory choice wording.
+    text = CHOICE_TEMPLATE_RE.sub("", text)
     primary, secondary = detect_modules(text)
     if derived:
         derived_name, derived_score = detect_derived_module(text, derived)
@@ -1022,7 +1034,7 @@ def check(
             record["subject_keywords"] = sorted(invented_map[module])
     # 题面正文只在内存里用于算相似度，不写进台账（台账只留主体、模式与句式指纹）。
     for record, (_, text) in zip(records, items):
-        record["_text"] = text
+        record["_text"] = str(text or "").replace(review_contract.CONTEXT_STATEMENT, "").strip()
     # 台账里已有的条目也要算进配额，否则跨批次还会超；
     # 但当前这批里已经有的同一条不要再算一遍——验收/复查时工作簿与台账装的是同一批记录，
     # 重复计数会把每个模块的条数翻倍（2026-09-16 实测 cc-9900003：3 条被算成 6 条，

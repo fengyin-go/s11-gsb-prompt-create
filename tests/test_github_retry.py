@@ -31,6 +31,16 @@ class GithubRetry(unittest.TestCase):
         self.assertEqual(run.call_count, 1)
         sleep.assert_not_called()
 
+    def test_transient_tls_timeout_is_retried(self):
+        with patch.object(hub, 'gh_binary', return_value='gh'), patch.object(
+            hub,
+            'run_cmd',
+            side_effect=[self.result(1, 'Get https://api.github.com: TLS handshake timeout'), self.result(0)],
+        ) as run, patch.object(hub.time, 'sleep') as sleep:
+            hub.repo_exists('selftest', 'task')
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+
     def test_budget_stops_before_next_retry(self):
         with patch.dict(hub.os.environ, {'S11_GITHUB_RETRY_BUDGET_SECONDS':'0'}), patch.object(hub, 'gh_binary', return_value='gh'), patch.object(hub, 'run_cmd', return_value=self.result(1, 'HTTP 429: too many requests')), patch.object(hub.time, 'sleep') as sleep:
             with self.assertRaisesRegex(RuntimeError, '预算'):

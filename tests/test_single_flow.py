@@ -1,6 +1,7 @@
 """Local Git integration: plan -> single-main clones -> real runner V2 reader."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ sys.path.insert(0, str(SCRIPTS))
 import batch_prompt_workbook as workbook
 import create_batch_tasks as create
 import prepare_handoff as handoff
+import create_source_snapshot as source_snapshot
 from s11_policy import allocate_counts, validate_plan
 
 
@@ -218,6 +220,74 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(row["编号"], "123")
         self.assertTrue(create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
                 owner="selftest", start_index=123, verify=True)["ok"])
+
+    def test_plain_local_directory_snapshot_creates_github_tasks(self):
+        local = self.base / "plain-local-source"
+        local.mkdir()
+        shutil.copytree(self.source / "src", local / "src")
+        (local / "Makefile").write_text("setup:\n\t@true\ntest:\n\t@true\n", encoding="utf-8")
+        (local / "node_modules").mkdir()
+        (local / "node_modules/installed.txt").write_text("local dependency", encoding="utf-8")
+        (local / ".env").write_text("SECRET=local-only\n", encoding="utf-8")
+        (local / ".env.example").write_text("SECRET=example\n", encoding="utf-8")
+        snapshot = source_snapshot.prepare_source_snapshot(
+            local,
+            self.parent,
+            source_name="localorders",
+        )
+        self.assertEqual(sh(snapshot["snapshot_dir"], "rev-parse", "--abbrev-ref", "HEAD"), "main")
+        self.assertFalse(sh(snapshot["snapshot_dir"], "status", "--porcelain"))
+        tracked = set(sh(snapshot["snapshot_dir"], "ls-files").splitlines())
+        self.assertIn("src/orders.py", tracked)
+        self.assertIn(".env.example", tracked)
+        self.assertNotIn(".env", tracked)
+        self.assertFalse(any(path.startswith("node_modules/") for path in tracked))
+
+        self.topic["base_commit"] = snapshot["snapshot_commit"]
+        create.save_json(self.parent / "repo-topic-map.json", self.topic)
+        (Path(snapshot["snapshot_dir"]) / "node_modules").mkdir()
+        (Path(snapshot["snapshot_dir"]) / "node_modules/runtime-only.txt").write_text(
+            "installed after snapshot", encoding="utf-8"
+        )
+        create.save_json(self.parent / "startup-preflight.json", {
+            "source_mode": "directory_snapshot",
+            "snapshot_commit": snapshot["snapshot_commit"],
+            "snapshot_id": snapshot["snapshot_id"],
+            "startup_ok": True,
+            "cleaned_up": True,
+            "dependency_ignored": True,
+            "dependency_paths": ["node_modules"],
+            "startup_commit": snapshot["snapshot_commit"],
+            "baseline_commit": snapshot["snapshot_commit"],
+            "startup_command": "python3 -c 'from src.orders import orders; orders()'",
+            "startup_evidence": "plain local directory snapshot fixture succeeds",
+        })
+        self.wire_git()
+        with patch.object(
+            create.hub,
+            "source_remote_url",
+            side_effect=AssertionError("snapshot mode must not require a source origin"),
+        ):
+            result = create.create_batch(
+                self.parent,
+                snapshot["snapshot_dir"],
+                self.parent / "repo-topic-map.json",
+                preflight=self.parent / "startup-preflight.json",
+                owner="selftest",
+                snapshot_manifest=snapshot["snapshot_manifest"],
+            )
+        self.assertEqual(result["source_mode"], "directory_snapshot")
+        self.assertEqual(result["source_name"], "localorders")
+        self.assertEqual(result["tasks"][0]["folder"], "localorders-01-development")
+        task = self.parent / result["tasks"][0]["folder"]
+        self.assertTrue((task / "origin/node_modules/runtime-only.txt").is_file())
+        self.assertNotIn(
+            "node_modules/runtime-only.txt",
+            sh(task / "origin", "ls-files").splitlines(),
+        )
+        stored = create.read_json(self.parent / create.MANIFEST)
+        self.assertEqual(stored["source_mode"], "directory_snapshot")
+        self.assertEqual(stored["snapshot_id"], snapshot["snapshot_id"])
 
     def test_resume_legacy_batch_retains_frozen_ids(self):
         self.wire_git()

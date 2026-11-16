@@ -8,6 +8,7 @@
 
 ```json
 {
+  "source_mode": "git_remote",
   "startup_ok": true,
   "startup_commit": "40位最终基准SHA",
   "startup_command": "实际启动命令",
@@ -22,6 +23,30 @@
 ```
 
 没有本地依赖目录时 `dependency_paths` 可为 `[]`，但仍需真实运行入口。相对依赖路径必须在源仓库内，被 .gitignore 覆盖，且未被 Git 跟踪。已跟踪的 vendor 属于源码快照，不当成需复制的忽略目录。
+
+普通本地目录使用 `source-snapshot` 模式。原目录不需要 Git 或远端，但启动必须在冻结快照中
+执行，并绑定同一份快照清单：
+
+```json
+{
+  "source_mode": "directory_snapshot",
+  "snapshot_commit": "40位快照SHA",
+  "snapshot_id": "sha256:...",
+  "startup_ok": true,
+  "startup_commit": "同一个快照SHA",
+  "baseline_commit": "同一个快照SHA",
+  "startup_command": "在 source-snapshot 中实际执行的启动命令",
+  "startup_result": "实际结果摘要",
+  "startup_evidence": {"entry": "实际端口或CLI输入输出", "log": "真实成功日志"},
+  "cleaned_up": true,
+  "dependency_paths": ["node_modules"],
+  "dependency_ignored": true
+}
+```
+
+快照模式不要求 `baseline_push_ok`。`source-snapshot.json` 记录原目录、任务仓库名前缀、
+`snapshot_commit`、`snapshot_tree`、`snapshot_id`、文件摘要和实际排除模式；建仓清单同时冻结
+`source_mode=directory_snapshot` 与这些字段。
 
 ## handoff-metadata.json
 

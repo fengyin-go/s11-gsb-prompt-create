@@ -38,11 +38,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import batch_prompt_workbook as workbook_lib  # noqa: E402
 from prompt_history_lib import detect_prefix, load_history  # noqa: E402
+import review_contract  # noqa: E402
 
 
 DEFAULT_THRESHOLD = 0.2
-GENERIC_CAPABILITY_RATIO = 0.3
+GENERIC_CAPABILITY_RATIO = 0.12
 GENERIC_CAPABILITY_MIN_COUNT = 3
+# The batch format requires shared H1/H2/H3 scaffolds. A gram used by more than
+# a few prompts is structural boilerplate rather than a pair-specific duplicate;
+# the theme gate audits those repeated scaffolds separately.
+DEFAULT_GENERIC_GRAM_RATIO = 0.12
 
 # 业务能力词典：只有这些标签参与复合需求交叉重叠判据。
 CAPABILITY_LEXICON = {
@@ -75,10 +80,23 @@ GENERIC_LEXICON = {
 }
 
 PUNCTUATION = re.compile(r"[\s，。！？、；：,.!?;:\"'“”‘’（）()\[\]【】<>《》\-—_/\\|~`·…]")
+TASK_TYPE_RE = re.compile(r"\[(.+?)\]$")
+SCAFFOLDING_SENTENCE_PATTERNS = (
+    r"^(结果要关联|这一步涉及|同一段数据要|结果需落到|列表页与详情页|处理结果要关联|结果要落到|这一步要串联)",
+    r"^(顺着既有|沿着原有|按现有|跟着原有|从既有数据流|沿着现有数据流)",
+    r"^(处理中断后|并发争用|重复导入不得|执行异常时|断线恢复|任务中断后|并发执行只能|处理失败时)",
+    r"^跨模块",
+    r"^(导入、导出、|判定规则、|筛选、排序、|刷新、返回、|没有记录、|不生效、)",
+    r"^(业务状态变更、|权限、归属与|批量处理、|数据库依赖、|数据规则收拢|梳理现有)",
+)
 
 
 def normalize(text: str) -> str:
-    return PUNCTUATION.sub("", text)
+    business_text = str(text or "").replace(
+        review_contract.CONTEXT_STATEMENT,
+        "",
+    )
+    return PUNCTUATION.sub("", business_text)
 
 
 def ngrams(text: str, size: int) -> set[str]:
@@ -97,6 +115,12 @@ def text_overlap(left: str, right: str, size: int = 3) -> float:
 
 def tfidf_vectors(texts: list[str], size: int = 2) -> list[dict[str, float]]:
     counters = [Counter(ngrams(text, size)) for text in texts]
+    return tfidf_vectors_from_counters(counters)
+
+
+def tfidf_vectors_from_counters(
+    counters: list[Counter[str]],
+) -> list[dict[str, float]]:
     document_frequency: Counter[str] = Counter()
     for counter in counters:
         document_frequency.update(counter.keys())
@@ -110,6 +134,35 @@ def tfidf_vectors(texts: list[str], size: int = 2) -> list[dict[str, float]]:
         norm = math.sqrt(sum(value * value for value in vector.values())) or 1.0
         vectors.append({gram: value / norm for gram, value in vector.items()})
     return vectors
+
+
+def generic_grams(
+    gram_sets: list[set[str]],
+    *,
+    ratio: float = DEFAULT_GENERIC_GRAM_RATIO,
+) -> set[str]:
+    if len(gram_sets) < 3:
+        return set()
+    document_frequency: Counter[str] = Counter()
+    for grams in gram_sets:
+        document_frequency.update(grams)
+    return {
+        gram
+        for gram, count in document_frequency.items()
+        if count / len(gram_sets) > ratio
+    }
+
+
+def filtered_text_overlap(
+    left: set[str],
+    right: set[str],
+    excluded: set[str],
+) -> float:
+    a = left - excluded
+    b = right - excluded
+    if not a or not b:
+        return 0.0
+    return len(a & b) / min(len(a), len(b))
 
 
 def semantic_similarity(left: dict[str, float], right: dict[str, float]) -> float:
@@ -132,6 +185,31 @@ def generic_constraints(text: str) -> set[str]:
         if any(keyword in text for keyword in keywords):
             found.add(label)
     return found
+
+
+def task_type_from_label(label: str) -> str:
+    match = TASK_TYPE_RE.search(str(label or "").strip())
+    return match.group(1).strip() if match else ""
+
+
+def strip_scaffolding(text: str) -> str:
+    business_text = str(text or "").replace(review_contract.CONTEXT_STATEMENT, "")
+    kept: list[str] = []
+    for sentence in re.split(r"(?<=[。；！？])", business_text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if any(re.search(pattern, sentence) for pattern in SCAFFOLDING_SENTENCE_PATTERNS):
+            continue
+        # Keep the domain-side invariant after an open-choice connector, but
+        # remove the generic "由你决定采用哪份" clause itself.
+        sentence = re.sub(
+            r"，(?:由你|请自行|哪一版|最终采用|先后顺序|采用哪份)[^；。]*(?=；|。)",
+            "",
+            sentence,
+        )
+        kept.append(sentence)
+    return "".join(kept)
 
 
 def batch_generic_capabilities(capability_sets: list[set[str]]) -> set[str]:
@@ -165,7 +243,10 @@ def load_workbook_prompts(parent: Path, workbook_name: str) -> list[tuple[str, s
     for record in records:
         prompt = str(record.get("提示词", "") or "").strip()
         if prompt:
-            items.append((str(record.get("子文件夹名称", "") or "未命名"), prompt))
+            folder = str(record.get("子文件夹名称", "") or "未命名")
+            task_type = str(record.get("任务类型", "") or "").strip()
+            label = f"{folder}[{task_type}]" if task_type else folder
+            items.append((label, prompt))
     return items
 
 
@@ -207,8 +288,20 @@ def check(
     threshold: float,
 ) -> dict[str, object]:
     texts = [prompt for _, prompt in items]
-    vectors = tfidf_vectors(texts)
-    capability_sets = [capabilities(prompt) for prompt in texts]
+    business_texts = [strip_scaffolding(text) for text in texts]
+    trigram_sets = [ngrams(text, 3) for text in business_texts]
+    bigram_counters = [Counter(ngrams(text, 2)) for text in business_texts]
+    generic_3 = generic_grams(trigram_sets)
+    generic_2 = generic_grams([set(counter) for counter in bigram_counters])
+    filtered_counters = [
+        Counter({
+            gram: count for gram, count in counter.items()
+            if gram not in generic_2
+        })
+        for counter in bigram_counters
+    ]
+    vectors = tfidf_vectors_from_counters(filtered_counters)
+    capability_sets = [capabilities(text) for text in business_texts]
     generic_capabilities = batch_generic_capabilities(capability_sets)
 
     violations: list[dict[str, object]] = []
@@ -220,7 +313,15 @@ def check(
         pair_count += 1
         left_label, left_prompt = items[left]
         right_label, right_prompt = items[right]
-        overlap = text_overlap(left_prompt, right_prompt)
+        left_type = task_type_from_label(left_label)
+        right_type = task_type_from_label(right_label)
+        if left_type and right_type and left_type != right_type:
+            continue
+        overlap = filtered_text_overlap(
+            trigram_sets[left],
+            trigram_sets[right],
+            generic_3,
+        )
         semantic = semantic_similarity(vectors[left], vectors[right])
         shared_all = capability_sets[left] & capability_sets[right]
         shared = sorted(shared_all - generic_capabilities)

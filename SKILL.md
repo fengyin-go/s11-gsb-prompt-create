@@ -1,13 +1,13 @@
 ---
 name: s11-gsb-prompt-create
-description: "solo11 单轮 pointwise 批量出题：真实启动基准仓库并复用依赖，默认按仓库最高有效容量、类型比例仅作建议，按 semantic-v2 业务题位创建每题独立 GitHub 仓库，只使用 main、origin 和 workspace；生成提示词并通过难度及跨项目查重，再交接给 s11-feedback-run。用于新批次建仓、出题和运行交接。"
+description: "solo11 单轮 pointwise 批量出题：可从 GitHub/Git 仓库或普通本地目录快照生成，真实启动基准并复用依赖，默认按仓库最高有效容量、类型比例仅作建议，按 semantic-v2 业务题位创建每题独立 GitHub 仓库，只使用 main、origin 和 workspace；生成提示词并通过难度及跨项目查重，再交接给 s11-feedback-run。用于新批次建仓、出题和运行交接。"
 ---
 
 # S11 批量出题
 
 数据仓库发布身份以当前电脑 `gh` 实际生效令牌为准，用 `gh api user` 读取活跃账号；不同电脑不要求固定账号，`_config/settings.json` 的 `github_owner` 不再决定建仓 owner。显式传入的 owner 只能与当前活跃账号一致。活跃账号为 `fengyin-solo` 时必须立即停止任务并提示切换账号，不能尝试其他账号回退。旧交付链接与历史证据保持原样，迁移既有仓库需另行明确处理。
 
-从 `gsb-prompt-create` 复制的单次运行版本。先真实启动原始仓库、冻结依赖基线，再按业务 topic 排题位、建仓、生成首轮提示词，最后输出 `s11-feedback-run` 可直接读取的批次。不投递 Trae、不运行模型、不生成 Feedback。
+从 `gsb-prompt-create` 复制的单次运行版本。先真实启动 Git 源仓库或普通本地目录快照、冻结依赖基线，再按业务 topic 排题位、建仓、生成首轮提示词，最后输出 `s11-feedback-run` 可直接读取的批次。不投递 Trae、不运行模型、不生成 Feedback。
 
 本 skill 内的脚本和类型规则独立维护；不要调用原 GSB 的 A/B 建仓脚本，或用共享 solo-create 脚本写表。本文命令中的 `<skill>` 指本 `SKILL.md` 所在目录。
 
@@ -41,6 +41,8 @@ GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositorie
 <root>/_config/settings.json
 <root>/batches/<batch>/
   repo-topic-map.json
+  source-snapshot.json                本地目录模式：冻结来源、文件摘要与快照提交
+  source-snapshot/                    本地目录模式：独立 Git 快照，作为所有任务仓库的共同 main 基线
   startup-preflight.json
   tasks.xlsx
   s11-task-repos.json
@@ -55,17 +57,34 @@ GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositorie
 
 一个提示词对应一个任务目录、一个独立 GitHub 仓库、一份 origin、一份 workspace。远端只创建 `main`。初始时 main 指向基准提交；运行侧之后把产物提交推进到同一 main。初始快照使用 `/commit/<initial_commit>`，不要要求运行后的 main 仍停在基线，也不要另建基线、A、B 分支。
 
-任务目录名、任务 ID、容器名和 GitHub 任务仓库名统一为 `<原仓库名>-<提示词编号两位数>-<任务类型英文名>`。提示词编号取 task_plan 的 sequence，例如原仓库 `cc10003` 的第一题为 Bugfix 时，目录和仓库都命名为 `cc10003-01-bugfix`。五类英文名固定为 `development`、`bugfix`、`optimization`、`refactor`、`migration`。`--start-index` 仅控制工作簿“编号”列的起始值，不参与目录或仓库命名。同一 root 的不同批次不得复用任务 ID（容器名就是任务 ID）。仓库名已被占用且未登记在本批清单时立即停止，不换名、不认领；只有清单明确登记的仓库可恢复复用。旧 `s11-六位数字` 批次保持原样并可继续读取，不自动重命名；已启动批次可按冻结的完整计划恢复未完成建仓，沿用原编号和 start-index。旧批次的额外扩容需单独处理，不与新命名混用。
+来源支持两种模式：
+
+- `git_remote`：现有 Git 模式。原仓库必须有干净提交和可访问的 `origin`，最终提交已在远端分支。
+- `directory_snapshot`：普通本地目录模式。原目录不需要 `.git` 或远端；先用 `create_source_snapshot.py` 生成 `<batch>/source-snapshot/` 和 `source-snapshot.json`，后续启动、topic map 和建仓都使用该冻结快照。任务仓库仍然必须是独立 GitHub 仓库。
+
+任务目录名、任务 ID、容器名和 GitHub 任务仓库名统一为 `<来源名>-<提示词编号两位数>-<任务类型英文名>`。Git 模式的来源名取原仓库远端名，本地目录模式取 `--name` 或目录名。提示词编号取 task_plan 的 sequence，例如来源名 `cc10003` 的第一题为 Bugfix 时，目录和仓库都命名为 `cc10003-01-bugfix`。五类英文名固定为 `development`、`bugfix`、`optimization`、`refactor`、`migration`。`--start-index` 仅控制工作簿“编号”列的起始值，不参与目录或仓库命名。同一 root 的不同批次不得复用任务 ID（容器名就是任务 ID）。仓库名已被占用且未登记在本批清单时立即停止，不换名、不认领；只有清单明确登记的仓库可恢复复用。旧 `s11-六位数字` 批次保持原样并可继续读取，不自动重命名；已启动批次可按冻结的完整计划恢复未完成建仓，沿用原编号和 start-index。旧批次的额外扩容需单独处理，不与新命名混用。
 
 旧 A/B 批次不自动删除、改名或覆盖；本入口会拒绝。需要迁移时先明确保留哪次产物并单独处理，不能把两侧结果合成一次运行。
 
 ## 1. 真实启动和依赖基线
 
-先读 [references/startup-baseline.md](references/startup-baseline.md)。必须实际执行项目主入口，Web 项目优先内置浏览器验证页面，并检查前后端就绪；测试或编译成功不能替代启动。工作树必须属于最终基准提交。
+先读 [references/startup-baseline.md](references/startup-baseline.md)。必须实际执行项目主入口，Web 项目优先内置浏览器验证页面，并检查前后端就绪；测试或编译成功不能替代启动。Git 模式的工作树必须属于最终基准提交；本地目录模式必须在生成的 `source-snapshot/` 上预检并绑定快照提交。
 
-依赖安装成功后保留依赖目录，只停本次进程。缺忽略规则时只修改 `.gitignore`，检查暂存列表，提交并推送原始仓库，再以推送后的提交重新启动验证。不擅自修源码。失败即停，保留命令、SHA、日志和原因，不建题、不写表。
+普通本地目录先冻结来源，不直接拿会继续变化的目录充当基准：
 
-在批次目录保存真实预检证据 `startup-preflight.json`，字段见 [references/handoff-schema.md](references/handoff-schema.md)。它不是让脚本代替启动的自我声明；所有成功值都必须有本轮实跑日志支持。脚本校验 SHA、必填证据、远端基线以及依赖存在和忽略状态。
+```bash
+python3 <skill>/scripts/create_source_snapshot.py \
+  --source <本地源码目录> \
+  --batch <root>/batches/b1111-01 \
+  --name <任务仓库名前缀>
+# 可选：--exclude path/to/runtime-data --exclude '*.sqlite'
+```
+
+脚本会生成稳定 `snapshot_commit`、`snapshot_id`、文件摘要和 `snapshot_tree`，排除 `.git`、常见依赖缓存、`.env` 等密钥文件，并在快照 `.gitignore` 写入受管排除块。原始目录内容变化不会影响已冻结快照；需要采用新源码时创建新批次或显式生成新快照，不覆盖旧快照。后续安装的依赖只保留在快照工作树中，不进入提交。
+
+依赖安装成功后保留依赖目录，只停本次进程。Git 模式缺忽略规则时只修改 `.gitignore`，检查暂存列表，提交并推送原始仓库，再以推送后的提交重新启动验证。本地目录模式必须在生成快照前用 `--exclude` 声明项目特有依赖；若后续安装产生新的未忽略依赖目录，立即停止并更换新批次/新快照，不能手工改冻结快照后继续，也不能让依赖进入任务仓库。不擅自修业务源码。失败即停，保留命令、SHA、日志和原因，不建题、不写表。
+
+在批次目录保存真实预检证据 `startup-preflight.json`，字段见 [references/handoff-schema.md](references/handoff-schema.md)。它不是让脚本代替启动的自我声明；所有成功值都必须有本轮实跑日志支持。脚本校验 SHA、必填证据、来源基线（Git 远端或快照身份）以及依赖存在和忽略状态。
 
 ## 2. 排题位、建仓
 
@@ -81,11 +100,14 @@ python3 <skill>/scripts/domain_fit.py --parent <batch目录> --repo <源仓库>
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123 --dry-run
 # 核对演练清单后，去掉 --dry-run 创建并发布初始仓库
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123
+
+# 本地目录快照模式：--source 指向冻结快照，并额外传清单
+python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <batch目录>/source-snapshot --snapshot-manifest <batch目录>/source-snapshot.json --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123 --dry-run
 ```
 
 依赖只复制到 origin，保留链接、权限和时间戳，不用硬链接，不提交依赖。至少在代表性 origin 和实际任务环境分别做无安装启动 smoke，全栈覆盖前后端。宿主 native 依赖不能直接搬到 Linux 容器。交接时 workspace 仍为干净克隆；运行侧从冻结初始提交生成不含 `.git` 的临时运行树，按实际 Linux 镜像准备、验证依赖后只把依赖缓存复制到运行树。初始和产物 Git 快照均不得包含依赖。详见 [运行侧缓存规则](../s11-feedback-run/references/performance.md)。
 
-`--verify` 只读复检原始计划对应的任务、origin/main 与远端仅有 main；运行后 main 可以推进，origin 和 task.json 的初始 SHA 保留。输出容量三块座位、实际题数、各类型数量、成功与失败清单。限流按上面的等待策略重试；其他失败不静默重试、不覆盖已有内容。
+`--verify` 只读复检原始计划对应的任务、origin/main 与远端仅有 main；运行后 main 可以推进，origin 和 task.json 的初始 SHA 保留。本地目录批次复检时也要传同一 `--snapshot-manifest`。输出容量三块座位、实际题数、各类型数量、成功与失败清单。限流按上面的等待策略重试；其他失败不静默重试、不覆盖已有内容。
 
 ## 3. 生成提示词
 
