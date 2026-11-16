@@ -10,6 +10,7 @@ from pathlib import Path
 import check_prompt_type_intent
 import difficulty_contract
 import domain_fit
+import check_prompt_naturalness
 import prompt_style
 
 
@@ -24,6 +25,7 @@ def check(candidate: dict, repo: Path) -> dict:
         return {"ok": False, "errors": ["样稿不能包含空题面"]}
     stages = {
         "style": prompt_style.prompt_errors(rows),
+        "naturalness": check_prompt_naturalness.check(rows)["errors"],
         "type_intent": check_prompt_type_intent.prompt_errors(rows, topic_map),
         "domain": domain_fit.map_errors(topic_map, repo) + domain_fit.prompt_errors(rows, topic_map),
         "difficulty": difficulty_contract.prompt_errors(rows, topic_map, repo),

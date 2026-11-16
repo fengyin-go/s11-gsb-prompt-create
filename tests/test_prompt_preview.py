@@ -26,19 +26,33 @@ class PreviewAdmissionTest(unittest.TestCase):
                 self.assertFalse(result["stages"]["domain"]["ok"])
                 self.assertFalse(result["stages"]["difficulty"]["ok"])
 
-    def test_all_four_stages_are_required_even_when_style_and_type_pass(self):
+    def test_all_five_stages_are_required_even_when_other_stages_pass(self):
         candidate = {"records": [{"提示词": "新增数据处理能力。"}], "topic_map": {}}
         targets = [
-            "prompt_style.prompt_errors", "check_prompt_type_intent.prompt_errors",
-            "domain_fit.map_errors", "domain_fit.prompt_errors", "difficulty_contract.prompt_errors",
+            "prompt_style.prompt_errors",
+            "check_prompt_naturalness.check",
+            "check_prompt_type_intent.prompt_errors",
+            "domain_fit.map_errors",
+            "domain_fit.prompt_errors",
+            "difficulty_contract.prompt_errors",
         ]
         from contextlib import ExitStack
         for failing in targets:
             with self.subTest(failing=failing), ExitStack() as stack:
-                mocks = [stack.enter_context(patch.object(
-                    getattr(preview, name.split(".")[0]), name.split(".")[1],
-                    return_value=["blocked"] if name == failing else [],
-                )) for name in targets]
+                mocks = []
+                for name in targets:
+                    module, attr = name.split(".")
+                    if name == "check_prompt_naturalness.check":
+                        value = (
+                            {"ok": False, "version": 1, "errors": ["blocked"]}
+                            if name == failing
+                            else {"ok": True, "version": 1, "errors": []}
+                        )
+                    else:
+                        value = ["blocked"] if name == failing else []
+                    mocks.append(stack.enter_context(
+                        patch.object(getattr(preview, module), attr, return_value=value)
+                    ))
                 result = preview.check(candidate, Path.cwd())
                 self.assertFalse(result["ok"])
                 for mock in mocks:

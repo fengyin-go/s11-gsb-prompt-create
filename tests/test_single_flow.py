@@ -405,7 +405,19 @@ class SingleFlow(unittest.TestCase):
                        "dependency_smoke": {"ok": True, "commit": self.commit, "command": "make test",
                                             "evidence": "fixture log", "cleaned_up": True}}}}
         create.save_json(self.parent / "handoff-metadata.json", metadata)
+        create.save_json(self.parent / workbook.MANIFEST_FILENAME, {
+            "workbook": str(self.parent / "tasks.xlsx"),
+            "workbook_sha256": "test-fixture",
+            "prompt_opportunities": {"ok": True},
+        })
         with patch.object(handoff, "validate_generation"), \
+                patch.object(handoff, "validate_prompt_opportunity", return_value={
+                    "path": "../prompt-opportunities/cc10003.json",
+                    "sha256": "a" * 64,
+                    "source_commit": self.commit,
+                    "selected_count": 36,
+                    "reserve_count": 12,
+                }), \
                 patch.object(handoff.hub, "active_github_account", return_value="selftest"):
             out = handoff.prepare(self.root, "b1111-01", self.parent / "handoff-metadata.json")
         self.assertTrue(out["ok"])

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -414,7 +415,45 @@ def run_cross_project_batch_gate(parent, config_path, config, records):
         return result
 
 
-def update_many(parent, candidates, *, repo=None, topic_map=None):
+def _validate_opportunity_map(repo: Path | None, topic_map: str | Path | None,
+                              opportunity_map: str | Path | None, *,
+                              required: bool = False) -> dict | None:
+    if not opportunity_map:
+        if required:
+            raise SystemExit("S11 正式批次必须提供仓库外 --opportunity-map")
+        return None
+    if repo is None or topic_map is None:
+        raise SystemExit("--opportunity-map 必须与 --repo 和 --topic-map 一起使用")
+    checker = Path(__file__).resolve().parent / "check_prompt_opportunities.py"
+    done = subprocess.run(
+        [
+            sys.executable,
+            str(checker),
+            "--repo",
+            str(Path(repo).expanduser().resolve()),
+            "--topic-map",
+            str(Path(topic_map).expanduser().resolve()),
+            "--opportunity-map",
+            str(Path(opportunity_map).expanduser().resolve()),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    try:
+        result = json.loads(done.stdout)
+    except ValueError:
+        raise SystemExit("机会地图检查器未返回有效 JSON：" + done.stderr[-1000:])
+    if done.returncode or result.get("ok") is not True:
+        raise SystemExit("提示词机会地图未通过：" + json.dumps(result, ensure_ascii=False))
+    result.setdefault("sha256", result.get("opportunity_sha256"))
+    return result
+
+
+def update_many(parent, candidates, *, repo=None, topic_map=None, opportunity_map=None,
+                require_topic_map=True):
     """Validate full candidate batch once and commit workbook/registry together under the registry lock."""
     from repo_topic_policy import load_topic_map
     from check_prompt_g16 import check as check_g16
@@ -431,7 +470,13 @@ def update_many(parent, candidates, *, repo=None, topic_map=None):
         row.update(提示词=item['prompt'],状态='已生成',更新时间=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         if 'note' in item:row['备注']=item['note']
     repo=repo or detect_repo(parent)
-    topic=load_topic_map(parent=parent,repo=repo,explicit=topic_map,required=True)
+    opportunity = _validate_opportunity_map(
+        repo,
+        topic_map,
+        opportunity_map,
+        required=require_topic_map,
+    )
+    topic=load_topic_map(parent=parent,repo=repo,explicit=topic_map,required=require_topic_map)
     cfg_path,cfg=load_cross_project_config(parent)
     if not cfg_path:raise SystemExit('缺少跨项目配置')
     registry=resolve_config_path(cfg['registry'],cfg_path.parent)
@@ -447,10 +492,25 @@ def update_many(parent, candidates, *, repo=None, topic_map=None):
             payload=cross_registry_lib.load_registry(registry)
             cross_registry_lib.upsert_entry(payload,path,batch_id=parent.name,batch_dir=parent,status='finalized',prompt_count=sum(bool(r['提示词']) for r in records),extra={'row_count':len(records)})
             cross_registry_lib.save_registry(registry,payload)
+            manifest = write_generation_manifest(
+                parent,
+                workbook=path,
+                repo=repo,
+                gate=gate,
+                skill={},
+                opportunity=opportunity,
+            )
         except Exception:
             path.write_bytes(original)
             raise
-    return {'ok':True,'updated':len(seen),'gate':gate,'cross_project':cross}
+    return {
+        'ok': True,
+        'updated': len(seen),
+        'gate': gate,
+        'opportunity_map': opportunity,
+        'generation_manifest': str(manifest),
+        'cross_project': cross,
+    }
 
 
 def run_write_gates(
@@ -472,9 +532,9 @@ def run_write_gates(
     三道都跑在「这份工作簿加上本次要写的那条提示词」之后的整批内容上，
     任何一道不通过就返回 ok=False，由调用方决定拒写还是显式放行。
 
-    `max_per_mode` 不传时沿用 check_repo_theme 的默认口径（现在是 3）：需求模式词典 13 类，
-    x 2 是 26 个模式席位（一个仓库到不了 30 条），x 3 是 39 个。要按更严的口径复核某一批，
-    显式传 2 即可；这个参数只影响本次调用。
+    `max_per_mode` 不传时沿用 check_repo_theme 的默认口径（现在是 3）。S11 正式批次
+    排除 `代码理解`，按 12 个可用模式 x 3 = 36 条验收；13 类词典 x 3 = 39 只保留为
+    通用脚本的理论席位，不作为 S11 的交付目标。
 
     `invented_subjects` 是 0-1 功能开发的新主体登记（名字 -> 词表）：任务类型里的「功能开发」
     就是 0-1 功能开发，允许它落在仓库里还不存在的模块上；登记后并入主体词表，
@@ -483,6 +543,7 @@ def run_write_gates(
     from check_prompt_dedup import check as dedup_check
     from check_prompt_difficulty import JUSTIFICATION_PREFIX
     from check_prompt_difficulty import check as difficulty_check
+    import check_prompt_naturalness
     import check_prompt_type_intent
     import domain_fit
     import difficulty_contract
@@ -538,6 +599,7 @@ def run_write_gates(
         check_prompt_type_intent.prompt_errors(records, topic_map) if topic_map else []
     )
     style_errors = prompt_style.prompt_errors(records)
+    naturalness = check_prompt_naturalness.check(records)
     difficulty_contract_errors = (
         difficulty_contract.prompt_errors(records, topic_map, repo) if topic_map else []
     )
@@ -588,6 +650,7 @@ def run_write_gates(
 
     problems: list[str] = []
     problems += [f"题面表达未通过：{error}" for error in style_errors]
+    problems += [f"自然度未通过：{error}" for error in naturalness.get("errors", [])]
     problems += [f"领域相关性未通过：{error}" for error in domain_errors]
     problems += [f"任务类型语义未通过：{error}" for error in type_intent_errors]
     problems += [f"困难设计契约未通过：{error}" for error in difficulty_contract_errors]
@@ -653,6 +716,11 @@ def run_write_gates(
             "version": prompt_style.STYLE_GATE_VERSION,
             "problems": style_errors,
         },
+        "prompt_naturalness": {
+            "ok": naturalness.get("ok") is True,
+            "version": naturalness.get("version"),
+            "problems": naturalness.get("errors", []),
+        },
         "type_intent": {
             "ok": not type_intent_errors,
             "version": check_prompt_type_intent.TYPE_GATE_VERSION,
@@ -695,12 +763,14 @@ def write_generation_manifest(
     repo: Path | None,
     gate: dict,
     skill: dict,
+    opportunity: dict | None = None,
 ) -> Path:
     """把这一批的生成规则版本与闸门结论落一份清单，跨机器可追溯。"""
     path = parent / MANIFEST_FILENAME
     payload = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "workbook": str(workbook),
+        "workbook_sha256": hashlib.sha256(workbook.read_bytes()).hexdigest(),
         "repo": str(repo) if repo else "",
         "gate_version": gate.get("gate_version"),
         "gate_ok": gate.get("ok"),
@@ -718,9 +788,11 @@ def write_generation_manifest(
         "violations": gate.get("problems") or [],
         "domain": gate.get("domain") or {},
         "prompt_style": gate.get("prompt_style") or {},
+        "prompt_naturalness": gate.get("prompt_naturalness") or {},
         "type_intent": gate.get("type_intent") or {},
         "difficulty_contract": gate.get("difficulty_contract") or {},
         "cross_project": gate.get("cross_project") or {},
+        "prompt_opportunities": opportunity or {},
         "skill": skill,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -778,13 +850,21 @@ def update(
     invented_limit: int | None = None,
     new_subject: str | None = None,
     subject_words: str | None = None,
+    opportunity_map: str | Path | None = None,
 ) -> dict:
     if allow_gate_failure:
         raise SystemExit("S11 不允许 --allow-gate-failure 绕过闸门")
     parsed = parse_folder_name(folder, parent)
     if not parsed:
         raise SystemExit(f"Cannot parse folder name: {folder}")
+    opportunity_result = None
     if prompt is not None:
+        opportunity_result = _validate_opportunity_map(
+            repo,
+            topic_map,
+            opportunity_map,
+            required=require_topic_map,
+        )
         from check_prompt_g16 import check as g16_check
         verdict = g16_check([(folder, parsed["task_type"], prompt)],
                             {folder: note} if note else {})
@@ -996,6 +1076,7 @@ def update(
                 repo=repo or detect_repo(parent),
                 gate=gate,
                 skill=skill,
+                opportunity=opportunity_result,
             )
     finally:
         cross_file_stack.close()
@@ -1109,6 +1190,10 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--repo", help="仓库路径；默认自动找父目录下任意任务目录的 origin")
     parser.add_argument("--topic-map", help="GSB semantic-v2 topic map")
+    parser.add_argument(
+        "--opportunity-map",
+        help="仓库外提示词机会地图；S11 新批次必须与 --repo / --topic-map 一起使用",
+    )
     parser.add_argument("--require-topic-map", action="store_true",
                         help="缺少 topic map 时拒绝写表")
     parser.add_argument("--allow-gate-failure", action="store_true",
@@ -1118,7 +1203,7 @@ def main() -> None:
     parser.add_argument(
         "--max-per-mode", type=int, default=None,
         help="同一个需求模式在一批里最多出几条；不传沿用 check_repo_theme 的默认口径（3）。"
-             "需求模式词典 13 类，x 2 是 26 个模式席位（一个仓库到不了 30 条），x 3 是 39 个。")
+             "S11 正式口径为 12 个可用模式（排除代码理解）x 3 = 36 条。")
     parser.add_argument(
         "--subject",
         help="0-1 功能开发的新主体名（任务类型必须是「功能开发」）：题面落在一个仓库里还不存在的"
@@ -1142,7 +1227,14 @@ def main() -> None:
     parent = Path(args.parent).expanduser().resolve()
     if args.command == 'update-many':
         if not args.candidates_file:raise SystemExit('缺少 --candidates-file')
-        result=update_many(parent,json.loads(Path(args.candidates_file).read_text()),repo=Path(args.repo).resolve() if args.repo else None,topic_map=args.topic_map)
+        result=update_many(
+            parent,
+            json.loads(Path(args.candidates_file).read_text()),
+            repo=Path(args.repo).resolve() if args.repo else None,
+            topic_map=args.topic_map,
+            opportunity_map=args.opportunity_map,
+            require_topic_map=args.require_topic_map,
+        )
     elif args.command == "scan":
         result = scan(parent, args.workbook)
     elif args.command == "update":
@@ -1159,6 +1251,7 @@ def main() -> None:
             invented_limit=args.invented_codegen_limit,
             new_subject=args.subject,
             subject_words=args.subject_words,
+            opportunity_map=args.opportunity_map,
         )
     else:
         result = pick(parent, args.workbook, args.range, args.limit)

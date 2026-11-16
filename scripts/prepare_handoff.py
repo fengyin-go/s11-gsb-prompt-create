@@ -2,6 +2,7 @@
 """Freeze S11 prompts, baseline and recording plans for s11-feedback-run."""
 from __future__ import annotations
 import argparse
+import hashlib
 import importlib.util
 import json
 import re
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import batch_prompt_workbook as workbook
 import check_prompt_type_intent
+import check_prompt_opportunities
 import domain_fit
 import difficulty_contract
 import prompt_style
@@ -63,6 +65,73 @@ def validate_generation(parent, rows, origin, metadata=None):
         raise ValueError('整批跨项目查重未通过')
 
 
+def validate_prompt_opportunity(parent, origin, topic_map_path):
+    """Revalidate the generation provenance before freezing a handoff."""
+    manifest_path = parent / workbook.MANIFEST_FILENAME
+    try:
+        manifest = read_json(manifest_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"缺少或无法读取提示词生成清单：{manifest_path}: {exc}") from exc
+    expected_workbook = parent / "tasks.xlsx"
+    if Path(manifest.get("workbook") or "").expanduser().resolve() != expected_workbook.resolve():
+        raise ValueError("提示词生成清单的 workbook 与当前批次不一致")
+    if Path(manifest.get("repo") or "").expanduser().resolve() != origin.resolve():
+        raise ValueError("提示词生成清单的 repo 与当前任务 origin 不一致")
+    recorded_workbook_sha = str(manifest.get("workbook_sha256") or "")
+    if not recorded_workbook_sha:
+        raise ValueError("提示词生成清单缺少 workbook_sha256")
+    actual_workbook_sha = hashlib.sha256(expected_workbook.read_bytes()).hexdigest()
+    if recorded_workbook_sha != actual_workbook_sha:
+        raise ValueError("tasks.xlsx 在提示词生成后发生变化，必须重新执行完整写入闸门")
+
+    recorded_opportunity = manifest.get("prompt_opportunities")
+    if not isinstance(recorded_opportunity, dict) or recorded_opportunity.get("ok") is not True:
+        raise ValueError("提示词生成清单缺少已通过的外部机会地图记录")
+    raw_path = str(recorded_opportunity.get("opportunity_map") or "").strip()
+    if not raw_path:
+        raise ValueError("提示词生成清单缺少机会地图路径")
+    opportunity_path = Path(raw_path).expanduser()
+    if not opportunity_path.is_absolute():
+        opportunity_path = parent / opportunity_path
+    opportunity_path = opportunity_path.resolve()
+    if opportunity_path.is_relative_to(origin.resolve()):
+        raise ValueError("机会地图不得位于任务 origin 仓库内")
+    for workspace in parent.glob("*/workspace"):
+        if opportunity_path.is_relative_to(workspace.resolve()):
+            raise ValueError("机会地图不得进入 workspace")
+
+    checked = check_prompt_opportunities.check(origin, topic_map_path, opportunity_path)
+    if checked.get("ok") is not True:
+        raise ValueError(
+            "交接前机会地图复核未通过："
+            + "；".join(checked.get("errors") or ["未知错误"])
+        )
+    recorded_map_sha = (
+        recorded_opportunity.get("sha256")
+        or recorded_opportunity.get("opportunity_sha256")
+    )
+    if str(recorded_map_sha or "") != str(checked.get("opportunity_sha256") or ""):
+        raise ValueError("提示词生成清单的 sha256 与当前机会地图不一致")
+    for key in ("repo_topic_map_sha256", "source_commit"):
+        if str(recorded_opportunity.get(key) or "") != str(checked.get(key) or ""):
+            raise ValueError(f"提示词生成清单的 {key} 与当前机会地图不一致")
+    return {
+        "path": (
+            str(opportunity_path.relative_to(parent))
+            if opportunity_path.is_relative_to(parent)
+            else str(opportunity_path)
+        ),
+        "sha256": checked["opportunity_sha256"],
+        "source_commit": checked["source_commit"],
+        "source_base_commit": checked.get("source_base_commit"),
+        "repo_topic_map_sha256": checked.get("repo_topic_map_sha256"),
+        "selected_count": checked.get("selected_count"),
+        "reserve_count": checked.get("reserve_count"),
+        "mode_counts": checked.get("mode_counts"),
+        "reserve_mode_counts": checked.get("reserve_mode_counts"),
+    }
+
+
 def prepare(root, batch, metadata_file):
     lib = runner_lib()
     root = lib.find_root(str(root))
@@ -84,7 +153,9 @@ def prepare(root, batch, metadata_file):
     topic_map = load_topic_map(parent=parent, repo=parent / entries[0]["task_id"] / "origin", required=True)
     topic_policy = topic_map.get("type_policy", "capacity-first")
     validate_type_counts(counts, len(rows), policy=topic_policy)
-    validate_generation(parent, rows, parent / entries[0]["task_id"] / "origin", meta)
+    first_origin = parent / entries[0]["task_id"] / "origin"
+    validate_generation(parent, rows, first_origin, meta)
+    opportunity_binding = validate_prompt_opportunity(parent, first_origin, parent / "repo-topic-map.json")
     import sys
     runtime_scripts = Path(__file__).resolve().parents[2]/'s11-feedback-run/scripts'
     if str(runtime_scripts) not in sys.path: sys.path.insert(0,str(runtime_scripts))
@@ -181,9 +252,15 @@ def prepare(root, batch, metadata_file):
         tasks.append(row_out)
         baselines[record["baseline_id"]] = baseline
         staged.append((target, record, recording))
+    generation_manifest_path = parent / workbook.MANIFEST_FILENAME
     batch_manifest = {"schema_version": 2, "batch_id": batch, "count": len(tasks), "tasks": tasks, "baselines": baselines,
                       "review_contract_required": True,
-                      "producer": "s11-gsb-prompt-create", "execution_mode": "single", "branch": "main"}
+                      "producer": "s11-gsb-prompt-create", "execution_mode": "single", "branch": "main",
+                      "generation_manifest": {
+                          "path": str(generation_manifest_path.relative_to(parent)),
+                          "sha256": hashlib.sha256(generation_manifest_path.read_bytes()).hexdigest(),
+                      },
+                      "prompt_opportunities": opportunity_binding}
     for target, record, recording in staged:
         save_json(target / "task.json", record)
         save_json(target / "recording-plan.json", recording)

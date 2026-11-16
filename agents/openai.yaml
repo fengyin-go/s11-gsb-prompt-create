@@ -1,4 +1,4 @@
 interface:
   display_name: "S11 单轮批量出题"
-  short_description: "S11 容量优先批量出题，支持本地目录快照、单 main 仓库与运行交接"
-  default_prompt: "使用 $s11-gsb-prompt-create 真实启动 Git 仓库或本地目录快照，按仓库最高有效容量生成，类型比例仅作建议，GitHub 限流等待重试，创建单 main、origin/workspace 批次，过难度和查重后交接给 s11-feedback-run。"
+  short_description: "S11 36 题批量出题，读取仓库外机会地图，生成自然连贯需求并完成运行交接"
+  default_prompt: "使用 $s11-gsb-prompt-create 真实启动 Git 仓库或本地目录快照，读取仓库外提示词机会地图，按 12 个可用模式各 3 条生成 36 个自然连贯的题面，通过领域、难度、自然度、主题和查重后交接给 s11-feedback-run。"
