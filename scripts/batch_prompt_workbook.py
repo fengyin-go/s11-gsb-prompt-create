@@ -752,7 +752,20 @@ def run_write_gates(
         },
         "difficulty": {"ok": difficulty.get("ok"), "violations": difficulty.get("violations"),
                        "needs_review": difficulty.get("needs_review")},
-        "dedup": {"ok": dedup.get("ok"), "violations": dedup.get("violations")},
+        "dedup": {
+            "ok": dedup.get("ok"),
+            "violations": dedup.get("violations"),
+            "raw_a5_ok": dedup.get("raw_a5_ok", False),
+            "raw_a5_violation_count": dedup.get("raw_a5_violation_count", 0),
+            "raw_a5_max_common_fragment_length": dedup.get(
+                "raw_a5_max_common_fragment_length", 0
+            ),
+            "raw_a5_max_internal_repeat_length": dedup.get(
+                "raw_a5_max_internal_repeat_length", 0
+            ),
+            "raw_a5_window_hits": dedup.get("raw_a5_window_hits", 0),
+            "raw_a5_nearest_pairs": dedup.get("raw_a5_nearest_pairs", []),
+        },
     }
 
 
@@ -767,6 +780,7 @@ def write_generation_manifest(
 ) -> Path:
     """把这一批的生成规则版本与闸门结论落一份清单，跨机器可追溯。"""
     path = parent / MANIFEST_FILENAME
+    dedup = gate.get("dedup") or {}
     payload = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "workbook": str(workbook),
@@ -791,6 +805,17 @@ def write_generation_manifest(
         "prompt_naturalness": gate.get("prompt_naturalness") or {},
         "type_intent": gate.get("type_intent") or {},
         "difficulty_contract": gate.get("difficulty_contract") or {},
+        "dedup": dedup,
+        "raw_a5_ok": dedup.get("raw_a5_ok"),
+        "raw_a5_violation_count": dedup.get("raw_a5_violation_count"),
+        "raw_a5_max_common_fragment_length": dedup.get(
+            "raw_a5_max_common_fragment_length"
+        ),
+        "raw_a5_max_internal_repeat_length": dedup.get(
+            "raw_a5_max_internal_repeat_length"
+        ),
+        "raw_a5_window_hits": dedup.get("raw_a5_window_hits"),
+        "raw_a5_nearest_pairs": dedup.get("raw_a5_nearest_pairs") or [],
         "cross_project": gate.get("cross_project") or {},
         "prompt_opportunities": opportunity or {},
         "skill": skill,
@@ -1101,6 +1126,23 @@ def update(
             "review_required_labels": (gate.get("theme") or {}).get("review_required_labels"),
             "candidate_pairs": (gate.get("theme") or {}).get("candidate_pairs"),
             "needs_review": (gate.get("difficulty") or {}).get("needs_review"),
+            "dedup": gate.get("dedup"),
+            "raw_a5_ok": (gate.get("dedup") or {}).get("raw_a5_ok"),
+            "raw_a5_violation_count": (gate.get("dedup") or {}).get(
+                "raw_a5_violation_count"
+            ),
+            "raw_a5_max_common_fragment_length": (gate.get("dedup") or {}).get(
+                "raw_a5_max_common_fragment_length"
+            ),
+            "raw_a5_max_internal_repeat_length": (gate.get("dedup") or {}).get(
+                "raw_a5_max_internal_repeat_length"
+            ),
+            "raw_a5_window_hits": (gate.get("dedup") or {}).get(
+                "raw_a5_window_hits"
+            ),
+            "raw_a5_nearest_pairs": (gate.get("dedup") or {}).get(
+                "raw_a5_nearest_pairs"
+            ),
             "cross_project": gate.get("cross_project"),
         }
         result["manifest"] = str(manifest) if manifest else ""

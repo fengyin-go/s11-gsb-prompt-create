@@ -19,6 +19,14 @@ SPEC.loader.exec_module(MODULE)
 
 
 class CrossProjectPromptCheckTest(unittest.TestCase):
+    def a5_fixture(self) -> dict:
+        path = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "platform-a5-cc10011-20261116.json"
+        )
+        return json.loads(path.read_text(encoding="utf-8"))
+
     def test_reused_overview_skeleton_is_rejected(self) -> None:
         candidate = {
             "label": "wx10002/codegen-1",
@@ -164,6 +172,90 @@ class CrossProjectPromptCheckTest(unittest.TestCase):
         result = MODULE.compare_prompts(candidate, peer)
 
         self.assertTrue(result["ok"], result["violations"])
+
+    def test_raw_a5_blocks_shared_chain_across_task_types(self) -> None:
+        records = self.a5_fixture()["records"]
+        candidate = {
+            "label": "candidate-development",
+            "task_type": "功能开发",
+            "prompt": records[0]["synthetic_prompt"],
+        }
+        peer = {
+            "label": "peer-bugfix",
+            "task_type": "Bugfix",
+            "prompt": records[1]["synthetic_prompt"],
+        }
+
+        result = MODULE.check([candidate], [peer])
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["raw_a5_ok"])
+        self.assertGreaterEqual(result["raw_a5_max_common_fragment_length"], 20)
+        self.assertGreaterEqual(result["raw_a5_window_hits"], 1)
+        self.assertTrue(result["raw_a5_nearest_pairs"])
+        self.assertTrue(result["raw_a5_nearest_pairs"][0]["window_hit"])
+
+    def test_raw_a5_ordinary_term_overlap_passes(self) -> None:
+        candidate = {
+            "label": "candidate",
+            "task_type": "功能开发",
+            "prompt": "采购单审核页面需要显示供应商名称、采购单编号和入库仓库。",
+        }
+        peer = {
+            "label": "peer",
+            "task_type": "功能优化",
+            "prompt": "供应商名称用于收货核对，仓库人员负责采购单审核。",
+        }
+
+        result = MODULE.check([candidate], [peer])
+
+        self.assertTrue(result["raw_a5_ok"], result["raw_a5_violations"])
+        self.assertLess(result["raw_a5_max_common_fragment_length"], 20)
+        self.assertEqual(result["raw_a5_window_hits"], 0)
+
+    def test_platform_confirmed_fragment_is_a_hard_gate_with_provenance(self) -> None:
+        chain = self.a5_fixture()["synthetic_shared_domain_chain"]
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "platform-corpus.json"
+            path.write_text(json.dumps({
+                "profile": "gsb-platform-prompt-corpus-v1",
+                "account": "tester",
+                "fetched_at": "2026-11-16T00:00:00+08:00",
+                "items": [{
+                    "id": 8398,
+                    "repo_id": "owner/peer-8398",
+                    "task_type": "功能开发",
+                    "status": "REJECTED",
+                    "qc_summary": "A-5 公共长片段（套模板）",
+                    "prompt": "检测样品接收记录与复核。",
+                    "dedup_hits": [{
+                        "sub_rule": "A-5",
+                        "self_excerpt": chain,
+                        "peer_excerpt": chain,
+                    }],
+                }],
+            }, ensure_ascii=False), encoding="utf-8")
+            peers, _ = MODULE.load_platform_corpus(path)
+
+        candidate = {
+            "label": "candidate",
+            "task_type": "Bugfix",
+            "prompt": f"光伏档案导出。{chain}。",
+        }
+        result = MODULE.check_platform_corpus([candidate], peers)
+        raw = MODULE.dedup_lib.summarize_raw_a5(
+            result.pop("raw_a5_pairs"),
+            [],
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(raw["raw_a5_ok"])
+        self.assertEqual(raw["raw_a5_nearest_pairs"][0]["platform_id"], "8398")
+        self.assertEqual(
+            raw["raw_a5_nearest_pairs"][0]["repo_id"],
+            "owner/peer-8398",
+        )
+        self.assertTrue(raw["raw_a5_nearest_pairs"][0]["confirmed_fragment_hit"])
 
 
 if __name__ == "__main__":

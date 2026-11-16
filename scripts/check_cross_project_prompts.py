@@ -306,7 +306,65 @@ def load_workbook_items(path: Path) -> list[dict[str, str]]:
     return items
 
 
-def load_platform_corpus(path: Path) -> tuple[list[dict[str, str]], dict[str, object]]:
+def _platform_confirmed_a5_fragments(raw: dict[str, object]) -> list[str]:
+    fragments: list[str] = []
+    seen: set[str] = set()
+    verdict = raw.get("verdict")
+    verdict_rule = (
+        str(
+            verdict.get("sub_rule")
+            or verdict.get("rule")
+            or verdict.get("rule_code")
+            or ""
+        )
+        if isinstance(verdict, dict)
+        else ""
+    )
+
+    def add(value: object) -> None:
+        text = dedup_lib._confirmed_fragment_text(value).strip()
+        normalized = dedup_lib.normalize_raw(text)
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        fragments.append(text)
+
+    confirmed = raw.get("confirmed_a5_fragments")
+    if isinstance(confirmed, list):
+        for item in confirmed:
+            add(item)
+    dedup_hits = raw.get("dedup_hits")
+    if isinstance(dedup_hits, list):
+        for hit in dedup_hits:
+            if not isinstance(hit, dict):
+                continue
+            rule = str(
+                hit.get("sub_rule")
+                or hit.get("rule")
+                or hit.get("rule_code")
+                or hit.get("rule_id")
+                or ""
+            )
+            description = str(
+                hit.get("qc_summary")
+                or hit.get("rule_name")
+                or hit.get("description")
+                or ""
+            )
+            if (
+                "A-5" not in rule
+                and "A-5" not in verdict_rule
+                and "A-5" not in description
+                and "公共长片段" not in description
+            ):
+                continue
+            add(hit.get("self_excerpt"))
+            add(hit.get("peer_excerpt"))
+            add(hit)
+    return fragments
+
+
+def load_platform_corpus(path: Path) -> tuple[list[dict[str, object]], dict[str, object]]:
     """读取平台题面快照，转成与本地 peer 相同的比较形状。"""
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -314,7 +372,7 @@ def load_platform_corpus(path: Path) -> tuple[list[dict[str, str]], dict[str, ob
     raw_items = payload.get("items")
     if not isinstance(raw_items, list):
         raise ValueError("平台题面语料缺少 items 数组")
-    items: list[dict[str, str]] = []
+    items: list[dict[str, object]] = []
     for index, raw in enumerate(raw_items, start=1):
         if not isinstance(raw, dict):
             continue
@@ -334,6 +392,7 @@ def load_platform_corpus(path: Path) -> tuple[list[dict[str, str]], dict[str, ob
             "source": "platform",
             "batch": "platform",
             "batch_id": "platform",
+            "confirmed_a5_fragments": _platform_confirmed_a5_fragments(raw),
         })
     meta = {
         "profile": str(payload.get("profile") or ""),
@@ -357,7 +416,10 @@ def corpus_age_hours(meta: dict[str, object]) -> float | None:
     return max(0.0, (datetime.now(timezone.utc) - moment.astimezone(timezone.utc)).total_seconds() / 3600)
 
 
-def _prompt_self_match(candidate: dict[str, str], peer: dict[str, str]) -> bool:
+def _prompt_self_match(
+    candidate: dict[str, object],
+    peer: dict[str, object],
+) -> bool:
     """同一批次复检时，允许忽略候选对应的那条平台旧记录。"""
     label = str(candidate.get("label") or "").strip()
     candidate_repo = str(candidate.get("repo_id") or "").strip()
@@ -370,8 +432,8 @@ def _prompt_self_match(candidate: dict[str, str], peer: dict[str, str]) -> bool:
 
 
 def compare_platform_prompt(
-    candidate: dict[str, str],
-    peer: dict[str, str],
+    candidate: dict[str, object],
+    peer: dict[str, object],
     *,
     max_similarity: float = DEFAULT_PLATFORM_MAX_SIMILARITY,
     max_common_fragment: int = DEFAULT_PLATFORM_MAX_COMMON_FRAGMENT,
@@ -384,6 +446,12 @@ def compare_platform_prompt(
     fragment = left[match.a:match.a + match.size]
     han_count = sum(1 for char in fragment if "\u4e00" <= char <= "\u9fff")
     ratio = float(matcher.ratio())
+    raw_a5 = dedup_lib.check_raw_a5(
+        left,
+        right,
+        confirmed_a5_fragments=peer.get("confirmed_a5_fragments"),
+        check_internal=False,
+    )
     violations: list[dict[str, object]] = []
     if ratio >= max_similarity:
         violations.append({
@@ -400,24 +468,32 @@ def compare_platform_prompt(
             "common_fragment": fragment,
             "message": "与平台历史题面共有长片段，属于平台已实测会判 A-5 的模板复用",
         })
+    for raw_violation in raw_a5["violations"]:
+        violations.append({
+            **raw_violation,
+            "kind": f"platform_{raw_violation['kind']}",
+            "message": "完整题面 raw A-5 命中：不剥离标题、领域链、兼容、恢复、同步或跨模块句",
+        })
     return {
         "ok": not violations,
         "similarity": round(ratio, 4),
         "longest_common_fragment": fragment,
         "longest_common_fragment_length": len(fragment),
         "common_han": han_count,
+        "raw_a5": raw_a5,
         "violations": violations,
     }
 
 
 def check_platform_corpus(
-    candidates: list[dict[str, str]],
-    peers: list[dict[str, str]],
+    candidates: list[dict[str, object]],
+    peers: list[dict[str, object]],
     *,
     max_similarity: float = DEFAULT_PLATFORM_MAX_SIMILARITY,
     max_common_fragment: int = DEFAULT_PLATFORM_MAX_COMMON_FRAGMENT,
 ) -> dict[str, object]:
     comparisons: list[dict[str, object]] = []
+    raw_pair_records: list[dict[str, object]] = []
     violations: list[dict[str, object]] = []
     max_ratio = 0.0
     max_fragment = 0
@@ -431,6 +507,11 @@ def check_platform_corpus(
                 max_similarity=max_similarity,
                 max_common_fragment=max_common_fragment,
             )
+            raw_pair_records.append({
+                "left_item": candidate,
+                "right_item": peer,
+                "result": result["raw_a5"],
+            })
             max_ratio = max(max_ratio, float(result["similarity"]))
             max_fragment = max(max_fragment, int(result["longest_common_fragment_length"]))
             item = {"candidate": candidate, "peer": peer, **result}
@@ -460,6 +541,7 @@ def check_platform_corpus(
         "max_common_fragment_length": max_fragment,
         "nearest": nearest,
         "violations": violations,
+        "raw_a5_pairs": raw_pair_records,
     }
 
 
@@ -610,12 +692,22 @@ def check(
     max_semantic_similarity: float = DEFAULT_MAX_SEMANTIC_SIMILARITY,
 ) -> dict[str, object]:
     comparisons: list[dict[str, object]] = []
+    raw_pair_records: list[dict[str, object]] = []
     violations: list[dict[str, object]] = []
     max_text = 0.0
     max_semantic = 0.0
     max_fragment = 0
     for candidate in candidates:
         for peer in peers:
+            raw_pair_records.append({
+                "left_item": candidate,
+                "right_item": peer,
+                "result": dedup_lib.check_raw_a5(
+                    str(candidate.get("prompt") or ""),
+                    str(peer.get("prompt") or ""),
+                    check_internal=False,
+                ),
+            })
             result = compare_prompts(
                 candidate,
                 peer,
@@ -637,12 +729,27 @@ def check(
                     **result,
                 })
 
+    raw_internal_records: list[dict[str, object]] = []
+    for candidate in candidates:
+        repeat = dedup_lib.longest_internal_raw_repeat(str(candidate.get("prompt") or ""))
+        raw_internal_records.append({
+            "item": candidate,
+            "length": len(repeat),
+            "fragment": repeat,
+        })
+    raw_a5 = dedup_lib.summarize_raw_a5(raw_pair_records, raw_internal_records)
+    violations.extend(raw_a5["raw_a5_violations"])
+
     violations.sort(
         key=lambda item: (
-            -len(item["violations"]),
-            -float(item["text_overlap"]),
-            -float(item["semantic_similarity"]),
-            str(item["candidate"]["label"]),
+            -len(item.get("violations") or []),
+            -float(item.get("text_overlap") or 0),
+            -float(item.get("semantic_similarity") or 0),
+            str(
+                (item.get("candidate") or {}).get("label")
+                if isinstance(item.get("candidate"), dict)
+                else item.get("left") or ""
+            ),
         )
     )
     nearest = sorted(
@@ -675,6 +782,17 @@ def check(
             for item in nearest
         ],
         "violations": violations,
+        "raw_a5_ok": raw_a5["raw_a5_ok"],
+        "raw_a5_violation_count": raw_a5["raw_a5_violation_count"],
+        "raw_a5_max_common_fragment_length": raw_a5[
+            "raw_a5_max_common_fragment_length"
+        ],
+        "raw_a5_max_internal_repeat_length": raw_a5[
+            "raw_a5_max_internal_repeat_length"
+        ],
+        "raw_a5_window_hits": raw_a5["raw_a5_window_hits"],
+        "raw_a5_nearest_pairs": raw_a5["raw_a5_nearest_pairs"],
+        "raw_a5_violations": raw_a5["raw_a5_violations"],
     }
 
 
@@ -917,7 +1035,7 @@ def main() -> None:
         else platform_corpus_path()
     )
     platform_enabled = bool(platform_path) and not args.no_platform_corpus
-    platform_peers: list[dict[str, str]] = []
+    platform_peers: list[dict[str, object]] = []
     platform_meta: dict[str, object] = {}
     platform_issues: list[dict[str, object]] = []
     platform_corpus_used = False
@@ -965,6 +1083,10 @@ def main() -> None:
         max_similarity=platform_max_similarity,
         max_common_fragment=platform_max_common_fragment,
     )
+    platform_raw_a5 = dedup_lib.summarize_raw_a5(
+        platform_result.pop("raw_a5_pairs", []),
+        [],
+    )
     forbidden_violations = check_forbidden_topics(candidates)
 
     result = check(
@@ -976,10 +1098,12 @@ def main() -> None:
     coverage_ok = not coverage_issues
     platform_ok = platform_result["ok"] and not platform_issues
     forbidden_ok = not forbidden_violations
+    raw_a5 = dedup_lib.merge_raw_a5_summaries(result, platform_raw_a5)
     final_ok = (
         bool(result["ok"])
         and platform_ok
         and forbidden_ok
+        and bool(raw_a5["raw_a5_ok"])
         and (coverage_ok or not args.require_coverage)
     )
     result.update({
@@ -1002,6 +1126,17 @@ def main() -> None:
         "platform_dedup_max_common_fragment_length": platform_result["max_common_fragment_length"],
         "platform_dedup_nearest": platform_result["nearest"],
         "platform_dedup_violations": platform_result["violations"],
+        "raw_a5_ok": raw_a5["raw_a5_ok"],
+        "raw_a5_violation_count": raw_a5["raw_a5_violation_count"],
+        "raw_a5_max_common_fragment_length": raw_a5[
+            "raw_a5_max_common_fragment_length"
+        ],
+        "raw_a5_max_internal_repeat_length": raw_a5[
+            "raw_a5_max_internal_repeat_length"
+        ],
+        "raw_a5_window_hits": raw_a5["raw_a5_window_hits"],
+        "raw_a5_nearest_pairs": raw_a5["raw_a5_nearest_pairs"],
+        "raw_a5_violations": raw_a5["raw_a5_violations"],
         "platform_forbidden_topic_ok": forbidden_ok,
         "platform_forbidden_topic_violations": forbidden_violations,
         "batch_dir": str(batch_dir),
@@ -1030,6 +1165,8 @@ def main() -> None:
             "platform_max_similarity": platform_max_similarity,
             "platform_max_common_fragment": platform_max_common_fragment,
             "platform_max_age_hours": DEFAULT_PLATFORM_CORPUS_MAX_AGE_HOURS,
+            "raw_a5_min_common_length": dedup_lib.RAW_A5_MIN_COMMON_LENGTH,
+            "raw_a5_platform_window_size": dedup_lib.RAW_A5_PLATFORM_WINDOW_SIZE,
         },
     })
     print(json.dumps(result, ensure_ascii=False, indent=2))

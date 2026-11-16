@@ -337,6 +337,42 @@ python3 <skill>/scripts/check_difficulty_contract.py --parent "<父目录>" --js
 - `check_prompt_dedup.py` 只覆盖当前批次和历史记录，不能代替这个跨项目闸；
   `check_repo_theme.py` 只覆盖当前仓库的 topic × 模式，也不能代替。
 
+#### raw A-5 公共长片段硬闸
+
+A-5 不能只靠过滤后的业务文本和整题相似度判断。cc10011 的真实回执里，整题相似度只有
+`7.56%—18.12%` 的题仍因不同 topic、不同任务类型复用同一段领域链而废弃；失败片段通常
+跨越 `40—60` 个汉字。生成和写表时必须同时保留现有业务文本比较与独立的完整题面比较：
+
+- raw 归一化只去除空白和中英文标点、统一大小写，不删除 H1/H2/H3，也不删除领域链、
+  兼容、历史兼容、中断恢复、同步消费、另一业务面或跨模块句。
+- 任一完整题面与 peer 的最长连续公共片段达到 `20` 字，直接失败。
+- 同一题面内部重复出现达到 `20` 字的连续片段，直接失败。
+- 两条完整题面存在任意完全相同的 `40` 字窗口，直接失败；这是平台等价硬闸。
+- 与平台 `confirmed_a5_fragments` 完全一致，或连续公共片段覆盖 confirmed 片段的
+  主体，直接失败。整题相似度低不是安全条件。
+- 不为“兼容已有、兼容历史、中断后恢复、重复提交、状态单向推进、另一个业务模块、
+  同步消费、数据快照、生成数据集”等词句设置全局白名单。真实已有接口名、字段名或
+  固定协议名若必须保留，只能精确登记原文、原因和来源，并在结果中显示豁免来源，禁止
+  正则或类别批量豁免。
+- 写表闸门没有备注放行或 `--allow-gate-failure` 通道。`prompt-generation-manifest.json`
+  必须记录 `raw_a5_ok / raw_a5_violation_count /
+  raw_a5_max_common_fragment_length / raw_a5_max_internal_repeat_length /
+  raw_a5_window_hits / raw_a5_nearest_pairs`，验收值为 `true / 0 / <=19 / <=19 / 0`。
+
+#### domain_chain 与三段逐题句
+
+1. 每个 `domain_chain` 只在主请求中完整表达一次。
+2. 后续 H1、H2、H3 可以引用输入、产物和观察结果，但不得再次完整复述
+   “读取输入 -> 处理 -> 生成产物 -> 保证可追溯”。
+3. 禁止由全局数组按下标批量轮换“兼容已有……”“另一个业务入口……”
+   “同步到协作业务面……”“中断后从上一完整数据继续……”等句子。
+4. 每条题必须单独编写 `integration_sentence`、`implementation_constraint_sentence`
+   和 `consumer_observation_sentence`，不能把这些字段当作批量模板换名词。
+5. 上述三句必须写具体模块、具体数据产物和具体业务后果；只替换业务名词不算重写。
+6. 同一 topic 的不同任务类型，不得复用完整 `domain_chain` 句子。
+7. 不同 topic 之间也不得通过“兼容/同步/恢复/状态推进”模板形成 `20` 字以上公共片段。
+8. 不需要在最终题面中追加通用的“验收观察”尾注；观察结果应自然落在具体业务主链路中。
+
 固定命令：
 
 ```bash
@@ -376,9 +412,11 @@ python3 <skill>/scripts/check_cross_project_prompts.py \
 `gsb-cross-project.json` 由建仓脚本在非 dry-run 建仓时自动写入；已有批次可手工补一份，或由
 建仓脚本后续重跑时补写。首次批次确实没有任何历史时，把配置里的 `bootstrap_no_history` 临时设为
 `true`，跑完首次建仓/生成后立即改回 `false`，并在生成清单里保留这次 bootstrap 记录。
-`--allow-gate-failure` 只放开同仓库主题、难度和批内去重，不能绕过跨项目注册表硬闸。
+S11 的 `update` 当前拒绝 `--allow-gate-failure`；备注、manifest 或历史字段都不能放行
+raw A-5、跨项目注册表或其他硬闸。
 
-脚本默认硬拦（先限定为同一任务类型且需求模式有交集，避免把不同模式只共享行业词的题误伤）：
+脚本保留的过滤业务文本闸默认硬拦（先限定为同一任务类型且需求模式有交集，避免把不同模式
+只共享行业词的题误伤）；raw A-5 闸不受这些条件限制：
 
 - 字符三元组重合率 `> 20%`；
 - 字符二元组余弦近似度 `> 35%`；
@@ -395,5 +433,8 @@ python3 <skill>/scripts/check_cross_project_prompts.py \
 `platform_guard_ok`、`platform_corpus_used`、`platform_corpus_path`、
 `platform_dedup_ok`、`platform_dedup_violation_count`、`platform_dedup_max_similarity`、
 `platform_dedup_max_common_fragment_length`、`platform_dedup_nearest`、
-`platform_forbidden_topic_ok`、`platform_forbidden_topic_violations` 和最近邻明细。
+`platform_forbidden_topic_ok`、`platform_forbidden_topic_violations`、
+`raw_a5_ok`、`raw_a5_violation_count`、`raw_a5_max_common_fragment_length`、
+`raw_a5_max_internal_repeat_length`、`raw_a5_window_hits`、
+`raw_a5_nearest_pairs` 和最近邻明细。
 任一失败时不得写工作簿；按最近邻逐条写出“入口形态、动作顺序、状态关系、异常反馈”四个差异点后重出。

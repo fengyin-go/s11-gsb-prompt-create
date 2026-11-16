@@ -28,14 +28,18 @@ def test_shared_business_text_still_counts() -> None:
     assert text_overlap(left, right) >= 0.2
 
 
-def test_different_task_types_are_not_compared() -> None:
+def test_different_task_types_still_run_raw_a5_comparison() -> None:
     shared = "同一段业务说明必须保留在查重正文并继续影响后续结果"
     items = [
         (f"a[功能开发]", f"客户分群画像数据。{shared}。{CONTEXT_STATEMENT}"),
         (f"b[Bugfix]", f"客户分群画像数据。{shared}。{CONTEXT_STATEMENT}"),
     ]
 
-    assert check(items, 0.2)["ok"] is True
+    result = check(items, 0.2)
+
+    assert result["ok"] is False
+    assert result["raw_a5_ok"] is False
+    assert result["raw_a5_violation_count"] > 0
 
 
 def test_required_scaffolding_is_not_business_duplication() -> None:

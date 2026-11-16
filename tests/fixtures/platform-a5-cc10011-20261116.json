@@ -1,0 +1,325 @@
+{
+  "schema_version": 1,
+  "fixture_id": "platform-a5-cc10011-20261116",
+  "evidence_source": {
+    "kind": "user_reported_platform_receipt_summary",
+    "platform": "SOLO2",
+    "batch": "cc10011",
+    "recorded_at": "2026-11-16",
+    "platform_api_accessed": false,
+    "user_prompt_included": false,
+    "full_detail_included": false,
+    "omitted_fields": [
+      "user_prompt",
+      "repo_id",
+      "question_type",
+      "verdict.similarity",
+      "peer.submission_id",
+      "peer.repo_id",
+      "dedup_hits[].self_excerpt",
+      "dedup_hits[].peer_excerpt"
+    ],
+    "note": "平台详情未在本机拉取。这里保留用户提供的 submission id、A-5 结论、整题相似度范围和大意，并用明确标注为 synthetic 的结构等价样例覆盖本地检测逻辑，不伪造原始题面或缺失详情。"
+  },
+  "known_platform_facts": {
+    "submission_ids": [
+      "8291",
+      "8299",
+      "8307",
+      "8341",
+      "8357",
+      "8359",
+      "8361",
+      "8371",
+      "8393",
+      "8398"
+    ],
+    "sub_rule": "A-5",
+    "sub_rule_name": "公共长片段（套模板）",
+    "whole_prompt_similarity_range": [
+      0.0756,
+      0.1812
+    ],
+    "failed_fragment_length_range_han": [
+      40,
+      60
+    ],
+    "observation": "整题相似度低不等于 A-5 安全；不同 topic 或任务类型复用相同领域链长句仍会失败。",
+    "typical_chain": "读取某输入，校验或计算，生成某数据集，并保证某字段可追溯"
+  },
+  "synthetic_shared_domain_chain": "读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对",
+  "records": [
+    {
+      "platform_id": "8291",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "功能开发",
+      "synthetic_prompt": "光伏电站档案项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。补充电站并网日期查询。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    },
+    {
+      "platform_id": "8299",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "Bugfix",
+      "synthetic_prompt": "检测样品接收记录项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。修复样品类型筛选为空的问题。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    },
+    {
+      "platform_id": "8307",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "功能优化",
+      "synthetic_prompt": "预算差异分析项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。优化跨科目汇总的刷新耗时。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    },
+    {
+      "platform_id": "8341",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "功能开发",
+      "synthetic_prompt": "供应商回款跟踪项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。补充按合同查询回款状态。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    },
+    {
+      "platform_id": "8357",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "Bugfix",
+      "synthetic_prompt": "仓库盘点批次项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。修复盘点差异页重复展示。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    },
+    {
+      "platform_id": "8359",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "功能优化",
+      "synthetic_prompt": "客户分群画像项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。优化大客户行业分布的聚合速度。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    },
+    {
+      "platform_id": "8361",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "功能开发",
+      "synthetic_prompt": "运输线路成本核算项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。补充按线路查询月度成本。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    },
+    {
+      "platform_id": "8371",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "Bugfix",
+      "synthetic_prompt": "设备维修工单项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。修复超期工单数量不一致。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    },
+    {
+      "platform_id": "8393",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "功能优化",
+      "synthetic_prompt": "审计记录归档项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。优化跨年度归档的查询稳定性。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    },
+    {
+      "platform_id": "8398",
+      "repo_id": null,
+      "question_type": null,
+      "user_prompt": null,
+      "synthetic_task_type": "功能开发",
+      "synthetic_prompt": "门店排班计划项目。读取业务输入记录校验字段完整性并计算汇总结果生成可追溯数据集并保证来源批次与字段能够被下游核对。补充跨周排班冲突提示。",
+      "qc_summary": "A-5 公共长片段（套模板）",
+      "verdict": {
+        "sub_rule": "A-5",
+        "similarity": null,
+        "similarity_evidence": "whole_prompt_similarity_range=0.0756..0.1812"
+      },
+      "peer": {
+        "submission_id": null,
+        "repo_id": null
+      },
+      "dedup_hits": [
+        {
+          "sub_rule": "A-5",
+          "self_excerpt": null,
+          "peer_excerpt": null,
+          "synthetic_only": true
+        }
+      ]
+    }
+  ],
+  "clean_controls": [
+    {
+      "label": "legal-aggregate-panel",
+      "source": "existing_skill_positive_shape",
+      "prompt": "在光伏电站档案列表旁增加按所属区域和运维负责人汇总的负荷面板。面板给出每位负责人管理的电站数、并网运行数、停运维护数、总装机容量，点某位负责人后列表只保留其名下电站，清空该选择即恢复全部记录。名称或日期条件变化时汇总和列表必须同步，某区域没有值班负责人时显示明确说明，读取中断时保留上一次汇总并提示重试。"
+    },
+    {
+      "label": "ordinary-domain-terms",
+      "source": "synthetic_clean_control_not_platform_record",
+      "prompt": "采购单审核页面需要显示供应商名称、采购单编号和入库仓库，审批人可按优先级处理待办。"
+    }
+  ]
+}

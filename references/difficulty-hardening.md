@@ -178,6 +178,21 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
 }
 ```
 
+## A-5 与 H1/H2/H3 的边界
+
+困难设计不能靠重复领域链或批量套兼容、同步、恢复句来制造。每个 `domain_chain` 只在主请求
+中完整表达一次；后续 H1、H2、H3 应引用具体输入、数据产物和观察结果，不得再次完整复述
+“读取输入 -> 处理 -> 生成产物 -> 保证可追溯”。同一 topic 的不同任务类型、不同 topic 的
+题面之间，都不得复用完整领域链或通过“兼容/同步/恢复/状态推进”模板形成 `20` 字以上连续
+公共片段。
+
+`integration_sentence`、`implementation_constraint_sentence` 和
+`consumer_observation_sentence` 必须逐题编写，写出具体模块、具体数据产物和具体业务后果，
+不能由全局数组按下标轮换。H3 的冲突条件、方案代价和共同不变量要进入真实业务段落，不能靠
+通用尾注；也不需要在最终题面追加“验收观察”之类的模板句。raw A-5 闸直接比较完整题面，
+不剥离标题、领域链、兼容、恢复、同步或跨模块句；20 字连续公共片段、题内 20 字重复、
+平台 40 字窗口或 confirmed A-5 片段命中均直接失败。低整题相似度不是安全条件。
+
 ## 硬约束
 
 以上 JSON 是结构说明，示例路径、行号、条件和方案都不得照抄到真实题位；尤其不能用只证明
@@ -185,6 +200,8 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
 锚点语义，脚本只核验路径、行号和原文，不能自动证明成本分析属实。
 
 - `difficulty_contract_version` 必须为 `2`，每个 plan 的 `difficulty_design.version` 必须为 `2`。
+- 完整 `domain_chain` 只能进入主请求一次；H1/H2/H3 只能引用其中的具体输入、产物和观察，
+  不得换称呼后再次完整复述。
 - `reasoning_challenge.constraints` 至少两条，`kind` 至少两种不同值；每条都写 `failure_if_omitted`。
 - `module_integration.secondary_modules` 至少一个，`role` 必须是消费、写入、下游、审计、持久化、编排、通知或授权角色；列表/详情/概览等纯展示角色不允许。
 - `design_tradeoff.options` 至少两个不同且都可行的裁决，`outcome_invariant` 说明两种方案都必须守住的可观察结果，`implementation_not_prescribed` 必须为 `true`。

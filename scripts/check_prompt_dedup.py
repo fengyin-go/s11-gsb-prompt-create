@@ -32,7 +32,9 @@ import json
 import math
 import re
 import sys
+import unicodedata
 from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -47,6 +49,9 @@ GENERIC_CAPABILITY_MIN_COUNT = 3
 # a few prompts is structural boilerplate rather than a pair-specific duplicate;
 # the theme gate audits those repeated scaffolds separately.
 DEFAULT_GENERIC_GRAM_RATIO = 0.12
+RAW_A5_MIN_COMMON_LENGTH = 20
+RAW_A5_PLATFORM_WINDOW_SIZE = 40
+RAW_A5_CONFIRMED_COVERAGE = 0.8
 
 # 业务能力词典：只有这些标签参与复合需求交叉重叠判据。
 CAPABILITY_LEXICON = {
@@ -208,6 +213,377 @@ def strip_scaffolding(text: str) -> str:
     return "".join(kept)
 
 
+def normalize_raw(text: str) -> str:
+    """Normalize only punctuation, whitespace and case for raw A-5 checks."""
+
+    kept: list[str] = []
+    for char in str(text or "").lower():
+        if char.isspace() or unicodedata.category(char).startswith("P"):
+            continue
+        kept.append(char)
+    return "".join(kept)
+
+
+def longest_common_raw_fragment(left: str, right: str) -> str:
+    """Return the longest contiguous fragment after raw normalization."""
+
+    left_text = normalize_raw(left)
+    right_text = normalize_raw(right)
+    if not left_text or not right_text:
+        return ""
+    matcher = SequenceMatcher(None, left_text, right_text, autojunk=False)
+    match = matcher.find_longest_match(0, len(left_text), 0, len(right_text))
+    return left_text[match.a:match.a + match.size]
+
+
+def shared_raw_windows(
+    left: str,
+    right: str,
+    *,
+    size: int = RAW_A5_PLATFORM_WINDOW_SIZE,
+) -> list[str]:
+    """Return each distinct exact platform window shared by both prompts."""
+
+    left_text = normalize_raw(left)
+    right_text = normalize_raw(right)
+    if len(left_text) < size or len(right_text) < size:
+        return []
+    right_windows = {
+        right_text[index:index + size]
+        for index in range(len(right_text) - size + 1)
+    }
+    hits: list[str] = []
+    seen: set[str] = set()
+    for index in range(len(left_text) - size + 1):
+        window = left_text[index:index + size]
+        if window in right_windows and window not in seen:
+            seen.add(window)
+            hits.append(window)
+    return hits
+
+
+def _repeated_fragment_of_length(text: str, length: int) -> str:
+    positions: dict[str, list[int]] = {}
+    for index in range(len(text) - length + 1):
+        fragment = text[index:index + length]
+        for previous in positions.get(fragment, []):
+            if index - previous >= length:
+                return fragment
+        positions.setdefault(fragment, []).append(index)
+    return ""
+
+
+def longest_internal_raw_repeat(text: str) -> str:
+    """Return the longest repeated non-overlapping fragment in one prompt."""
+
+    normalized = normalize_raw(text)
+    low = 1
+    high = len(normalized) // 2
+    best = ""
+    while low <= high:
+        middle = (low + high) // 2
+        found = _repeated_fragment_of_length(normalized, middle)
+        if found:
+            best = found
+            low = middle + 1
+        else:
+            high = middle - 1
+    return best
+
+
+def _confirmed_fragment_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return ""
+    for key in ("text", "fragment", "excerpt", "self_excerpt", "peer_excerpt"):
+        raw = value.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw
+    return ""
+
+
+def confirmed_fragment_hits(
+    prompt: str,
+    confirmed_a5_fragments: list[object] | tuple[object, ...] | None,
+) -> list[dict[str, object]]:
+    """Check exact or subject-covering matches against registered A-5 fragments."""
+
+    prompt_text = normalize_raw(prompt)
+    hits: list[dict[str, object]] = []
+    for raw_fragment in confirmed_a5_fragments or []:
+        fragment_text = _confirmed_fragment_text(raw_fragment)
+        fragment = normalize_raw(fragment_text)
+        if not fragment:
+            continue
+        common = longest_common_raw_fragment(prompt_text, fragment)
+        coverage = len(common) / len(fragment) if fragment else 0.0
+        required = len(fragment)
+        if len(fragment) >= RAW_A5_MIN_COMMON_LENGTH:
+            required = max(
+                RAW_A5_MIN_COMMON_LENGTH,
+                math.ceil(len(fragment) * RAW_A5_CONFIRMED_COVERAGE),
+            )
+        if fragment in prompt_text or len(common) >= required:
+            hits.append({
+                "confirmed_fragment": fragment_text,
+                "matched_fragment": common,
+                "matched_length": len(common),
+                "coverage": round(coverage, 4),
+            })
+    return hits
+
+
+def check_raw_a5(
+    left_prompt: str,
+    right_prompt: str,
+    *,
+    confirmed_a5_fragments: list[object] | tuple[object, ...] | None = None,
+    check_internal: bool = True,
+) -> dict[str, object]:
+    """Run the platform-equivalent raw A-5 checks on complete prompt text."""
+
+    common_fragment = longest_common_raw_fragment(left_prompt, right_prompt)
+    common_length = len(common_fragment)
+    window_hits = shared_raw_windows(left_prompt, right_prompt)
+    left_repeat = longest_internal_raw_repeat(left_prompt) if check_internal else ""
+    right_repeat = longest_internal_raw_repeat(right_prompt) if check_internal else ""
+    confirmed_hits = confirmed_fragment_hits(left_prompt, confirmed_a5_fragments)
+
+    violations: list[dict[str, object]] = []
+    if common_length >= RAW_A5_MIN_COMMON_LENGTH:
+        violations.append({
+            "kind": "raw_a5_common_fragment",
+            "score": common_length,
+            "limit": RAW_A5_MIN_COMMON_LENGTH,
+            "fragment": common_fragment,
+        })
+    if window_hits:
+        violations.append({
+            "kind": "raw_a5_platform_window",
+            "score": len(window_hits),
+            "limit": 0,
+            "window_size": RAW_A5_PLATFORM_WINDOW_SIZE,
+            "fragments": window_hits[:10],
+        })
+    if len(left_repeat) >= RAW_A5_MIN_COMMON_LENGTH:
+        violations.append({
+            "kind": "raw_a5_internal_repeat",
+            "side": "left",
+            "score": len(left_repeat),
+            "limit": RAW_A5_MIN_COMMON_LENGTH,
+            "fragment": left_repeat,
+        })
+    if len(right_repeat) >= RAW_A5_MIN_COMMON_LENGTH:
+        violations.append({
+            "kind": "raw_a5_internal_repeat",
+            "side": "right",
+            "score": len(right_repeat),
+            "limit": RAW_A5_MIN_COMMON_LENGTH,
+            "fragment": right_repeat,
+        })
+    if confirmed_hits:
+        violations.append({
+            "kind": "raw_a5_confirmed_fragment",
+            "score": max(int(item["matched_length"]) for item in confirmed_hits),
+            "limit": 0,
+            "hits": confirmed_hits,
+        })
+
+    return {
+        "ok": not violations,
+        "longest_common_fragment": common_fragment,
+        "longest_common_fragment_length": common_length,
+        "window_hits": window_hits,
+        "window_hit_count": len(window_hits),
+        "max_internal_repeat_length": max(len(left_repeat), len(right_repeat)),
+        "left_internal_repeat": left_repeat,
+        "right_internal_repeat": right_repeat,
+        "confirmed_fragment_hits": confirmed_hits,
+        "violations": violations,
+    }
+
+
+def _item_label(item: dict[str, object]) -> str:
+    return str(item.get("label") or item.get("folder") or "未命名")
+
+
+def _item_prompt(item: dict[str, object]) -> str:
+    return str(item.get("prompt") or item.get("提示词") or "")
+
+
+def _raw_a5_provenance_item(
+    left_item: dict[str, object],
+    right_item: dict[str, object],
+) -> dict[str, object]:
+    if right_item.get("source") == "platform":
+        return right_item
+    if (
+        (right_item.get("platform_id") or right_item.get("repo_id"))
+        and not (left_item.get("platform_id") or left_item.get("repo_id"))
+    ):
+        return right_item
+    return left_item
+
+
+def _raw_a5_violation_entry(
+    left_item: dict[str, object],
+    right_item: dict[str, object],
+    violation: dict[str, object],
+) -> dict[str, object]:
+    peer = _raw_a5_provenance_item(left_item, right_item)
+    return {
+        **violation,
+        "left": _item_label(left_item),
+        "right": _item_label(right_item),
+        "left_prompt": _item_prompt(left_item),
+        "right_prompt": _item_prompt(right_item),
+        "platform_id": str(peer.get("platform_id") or ""),
+        "repo_id": str(peer.get("repo_id") or ""),
+    }
+
+
+def summarize_raw_a5(
+    pair_records: list[dict[str, object]],
+    internal_records: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """Aggregate raw A-5 pair and per-prompt repeat records."""
+
+    violations: list[dict[str, object]] = []
+    nearest: list[dict[str, object]] = []
+    max_common = 0
+    max_internal = 0
+    window_hits = 0
+    for record in pair_records:
+        left_item = record["left_item"]
+        right_item = record["right_item"]
+        result = record["result"]
+        assert isinstance(left_item, dict)
+        assert isinstance(right_item, dict)
+        assert isinstance(result, dict)
+        common_length = int(result.get("longest_common_fragment_length") or 0)
+        common_fragment = str(result.get("longest_common_fragment") or "")
+        window_count = int(result.get("window_hit_count") or 0)
+        confirmed_hits = result.get("confirmed_fragment_hits") or []
+        max_common = max(max_common, common_length)
+        window_hits += window_count
+        for violation in result.get("violations") or []:
+            assert isinstance(violation, dict)
+            violations.append(_raw_a5_violation_entry(left_item, right_item, violation))
+        peer = _raw_a5_provenance_item(left_item, right_item)
+        score = max(
+            common_length,
+            RAW_A5_PLATFORM_WINDOW_SIZE if window_count else 0,
+            max(
+                (int(item.get("matched_length") or 0) for item in confirmed_hits),
+                default=0,
+            ),
+        )
+        nearest.append({
+            "left": _item_label(left_item),
+            "right": _item_label(right_item),
+            "left_task_type": str(left_item.get("task_type") or ""),
+            "right_task_type": str(right_item.get("task_type") or ""),
+            "longest_common_fragment": common_fragment,
+            "longest_common_fragment_length": common_length,
+            "window_hit": bool(window_count),
+            "window_hit_count": window_count,
+            "internal_repeat": False,
+            "confirmed_fragment_hit": bool(confirmed_hits),
+            "platform_id": str(peer.get("platform_id") or ""),
+            "repo_id": str(peer.get("repo_id") or ""),
+            "match_score": score,
+        })
+
+    for record in internal_records or []:
+        item = record["item"]
+        assert isinstance(item, dict)
+        length = int(record.get("length") or 0)
+        fragment = str(record.get("fragment") or "")
+        max_internal = max(max_internal, length)
+        if length >= RAW_A5_MIN_COMMON_LENGTH:
+            violations.append({
+                "kind": "raw_a5_internal_repeat",
+                "left": _item_label(item),
+                "right": _item_label(item),
+                "left_prompt": _item_prompt(item),
+                "right_prompt": _item_prompt(item),
+                "fragment": fragment,
+                "score": length,
+                "limit": RAW_A5_MIN_COMMON_LENGTH,
+                "platform_id": str(item.get("platform_id") or ""),
+                "repo_id": str(item.get("repo_id") or ""),
+            })
+        nearest.append({
+            "left": _item_label(item),
+            "right": _item_label(item),
+            "left_task_type": str(item.get("task_type") or ""),
+            "right_task_type": str(item.get("task_type") or ""),
+            "longest_common_fragment": fragment,
+            "longest_common_fragment_length": length,
+            "window_hit": False,
+            "window_hit_count": 0,
+            "internal_repeat": True,
+            "confirmed_fragment_hit": False,
+            "platform_id": str(item.get("platform_id") or ""),
+            "repo_id": str(item.get("repo_id") or ""),
+            "match_score": length,
+        })
+
+    nearest.sort(
+        key=lambda item: (
+            -int(item["match_score"]),
+            str(item["left"]),
+            str(item["right"]),
+        )
+    )
+    return {
+        "raw_a5_ok": not violations,
+        "raw_a5_violation_count": len(violations),
+        "raw_a5_max_common_fragment_length": max_common,
+        "raw_a5_max_internal_repeat_length": max_internal,
+        "raw_a5_window_hits": window_hits,
+        "raw_a5_nearest_pairs": nearest[:10],
+        "raw_a5_violations": violations,
+    }
+
+
+def merge_raw_a5_summaries(*summaries: dict[str, object]) -> dict[str, object]:
+    violations: list[dict[str, object]] = []
+    nearest: list[dict[str, object]] = []
+    max_common = 0
+    max_internal = 0
+    window_hits = 0
+    for summary in summaries:
+        violations.extend(summary.get("raw_a5_violations") or [])
+        nearest.extend(summary.get("raw_a5_nearest_pairs") or [])
+        max_common = max(
+            max_common,
+            int(summary.get("raw_a5_max_common_fragment_length") or 0),
+        )
+        max_internal = max(
+            max_internal,
+            int(summary.get("raw_a5_max_internal_repeat_length") or 0),
+        )
+        window_hits += int(summary.get("raw_a5_window_hits") or 0)
+    nearest.sort(
+        key=lambda item: (
+            -int(item.get("match_score") or 0),
+            str(item.get("left") or ""),
+            str(item.get("right") or ""),
+        )
+    )
+    return {
+        "raw_a5_ok": not violations,
+        "raw_a5_violation_count": len(violations),
+        "raw_a5_max_common_fragment_length": max_common,
+        "raw_a5_max_internal_repeat_length": max_internal,
+        "raw_a5_window_hits": window_hits,
+        "raw_a5_nearest_pairs": nearest[:10],
+        "raw_a5_violations": violations,
+    }
+
+
 def batch_generic_capabilities(capability_sets: list[set[str]]) -> set[str]:
     """出现率过高的能力标签在本批里没有区分度，不参与交叉重叠判据。"""
 
@@ -301,6 +677,12 @@ def check(
     generic_capabilities = batch_generic_capabilities(capability_sets)
 
     violations: list[dict[str, object]] = []
+    raw_pair_records: list[dict[str, object]] = []
+    raw_internal_records: list[dict[str, object]] = []
+    raw_items = [
+        {"label": label, "prompt": prompt}
+        for label, prompt in items
+    ]
     max_text = 0.0
     max_semantic = 0.0
     pair_count = 0
@@ -309,6 +691,15 @@ def check(
         pair_count += 1
         left_label, left_prompt = items[left]
         right_label, right_prompt = items[right]
+        raw_pair_records.append({
+            "left_item": raw_items[left],
+            "right_item": raw_items[right],
+            "result": check_raw_a5(
+                left_prompt,
+                right_prompt,
+                check_internal=False,
+            ),
+        })
         left_type = task_type_from_label(left_label)
         right_type = task_type_from_label(right_label)
         if left_type and right_type and left_type != right_type:
@@ -361,6 +752,17 @@ def check(
                 }
             )
 
+    for item in raw_items:
+        repeat = longest_internal_raw_repeat(_item_prompt(item))
+        raw_internal_records.append({
+            "item": item,
+            "length": len(repeat),
+            "fragment": repeat,
+        })
+    raw_a5 = summarize_raw_a5(raw_pair_records, raw_internal_records)
+    raw_violations = list(raw_a5["raw_a5_violations"])
+    violations.extend(raw_violations)
+
     return {
         "ok": not violations,
         "threshold": threshold,
@@ -371,9 +773,21 @@ def check(
         "generic_capabilities": sorted(generic_capabilities),
         "violation_count": len(violations),
         "violations": violations,
+        "raw_a5_ok": raw_a5["raw_a5_ok"],
+        "raw_a5_violation_count": raw_a5["raw_a5_violation_count"],
+        "raw_a5_max_common_fragment_length": raw_a5[
+            "raw_a5_max_common_fragment_length"
+        ],
+        "raw_a5_max_internal_repeat_length": raw_a5[
+            "raw_a5_max_internal_repeat_length"
+        ],
+        "raw_a5_window_hits": raw_a5["raw_a5_window_hits"],
+        "raw_a5_nearest_pairs": raw_a5["raw_a5_nearest_pairs"],
+        "raw_a5_violations": raw_violations,
         "notes": [
             "语义近似度按字符二元组 TF-IDF 余弦计算，属于词面语义指标，生成方仍需做一次语义复核。",
             "复合需求交叉重叠只看业务能力点，空态、失败重试、刷新保持这类通用约束不参与判据。",
+            "raw A-5 独立比较完整题面：20 字连续片段和题内重复为主动预警，40 字平台窗口和 confirmed A-5 片段为硬闸。",
         ],
     }
 
