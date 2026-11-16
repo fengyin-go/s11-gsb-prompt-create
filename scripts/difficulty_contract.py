@@ -9,12 +9,18 @@ platform because the prompt itself only described medium-sized work.
 The contract does not replace semantic review. It makes the review auditable by
 requiring a source-anchored reasoning challenge, a real data-flow module
 integration, an open design tradeoff, and prompt excerpts that prove those
-decisions reached the final prompt. Version 2 uses the 2026-11-15 SOLO2
-calibration: eight accepted prompts all passed P4/P5, while two discarded
-prompts had H1/H2 but no genuine open H3 choice. The tradeoff check therefore
-requires a consequential choice axis and rejects a competing fixed-resolution
-rule on the same business object. New prompts express that axis through business
-conditions, not through instructions asking the implementer to choose.
+decisions reached the final prompt. Version 3 uses the 2026-11-16 platform
+calibration:
+
+- dfzr10012-14-bugfix passed P5 with a real completion-precedence decision;
+- dfzr10012-10-development and dfzr10012-11-bugfix were discarded with H1/H2
+  present but H3 absent, because the prompt already selected the winning branch.
+
+The tradeoff check therefore verifies that every option is independently valid
+under all H1 constraints, that options have distinct correctness effects, and
+that the final prompt does not already resolve the same dispute. New prompts
+express that axis through business conditions, not through instructions asking
+the implementer to choose.
 """
 
 from __future__ import annotations
@@ -31,7 +37,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3
 FOLDER_PLAN_RE = re.compile(
     r"-(0[1-9]|[1-9][0-9])-(development|bugfix|optimization|refactor|migration)$"
 )
@@ -67,6 +73,30 @@ ANTI_PATTERNS = (
     "example_data_only",
     "cross_call_merge_only",
 )
+DECISION_AXES = {
+    "source_of_truth",
+    "effective_time",
+    "completion_precedence",
+    "version_adoption",
+    "retention_vs_reclaim",
+    "recovery_vs_cleanup",
+    "old_vs_new_priority",
+    "authority_conflict",
+    "scope_boundary",
+    "partial_success_boundary",
+    "concurrency_conflict",
+    "migration_switch",
+    "other",
+}
+H3_FALSE_GUARDS = {
+    "one_branch_violates_constraints",
+    "fixed_resolution_in_prompt",
+    "implementation_only",
+    "retry_or_error_message_only",
+    "display_only",
+    "single_result_invariant_only",
+}
+CONTEXT_ANCHOR_SUPPORTS = {"trigger", "option_a", "option_b", "invariant"}
 OPEN_CHOICE_RE = re.compile(
     r"(?:"
     r"(?:由你|由设计者|请你|请自行|自行|自己)[^。；]{0,12}"
@@ -81,6 +111,18 @@ CLOSED_RESOLUTION_RE = re.compile(
     r"(?:冲突|先后)[^。；]{0,40}(?:以|按)[^。；]{0,40}"
     r"(?:为准|为依据|作为[^。；]{0,12}依据|优先)"
 )
+FIXED_BRANCH_RE = re.compile(
+    r"(?:只能|必须)[^。；]{0,24}(?:读取|采用|使用|保留|切换到|沿用)[^。；]{0,18}"
+    r"(?:刚启用|当前版本|最新版本|旧版本|历史版本|原值|旧缓存|受保护|可恢复)"
+    r"|不能(?:把|将|再用|继续用)?[^。；]{0,18}(?:旧|原值|历史)"
+    r"[^。；]{0,16}(?:写回|覆盖|恢复|采用)"
+    r"|(?:旧|历史|原值)[^。；]{0,12}(?:不得|不能|不允许)"
+    r"[^。；]{0,12}(?:写回|覆盖|恢复|采用)"
+    r"|(?:冲突|差异)[^。；]{0,32}(?:只能)[^。；]{0,50}"
+    r"(?:不能|不得)[^。；]{0,18}(?:删除|清理|覆盖|恢复|写回)"
+    r"|(?:只能|必须)[^。；]{0,80}(?:不能|不得)[^。；]{0,20}"
+    r"(?:删除|清理|覆盖|写回)"
+)
 BUSINESS_TENSION_RE = re.compile(
     r"冲突|不同[^。；]{0,12}(?:口径|版本|批次|来源)|同一[^。；]{0,24}(?:多|两|重复)"
     r"|多个[^。；]{0,20}(?:来源|规则|口径)|迟到|更正|补报|部分[^。；]{0,12}失败"
@@ -92,6 +134,8 @@ BUSINESS_TENSION_RE = re.compile(
 def _has_tradeoff_evidence(excerpt: str, context: str) -> bool:
     # Keep old lexical calibration readable; prompt_style rejects delegation in
     # new outputs. A natural excerpt must also share the actual context object.
+    if _fixed_branch_evidence(excerpt):
+        return False
     if OPEN_CHOICE_RE.search(excerpt):
         return True
     return bool(
@@ -100,6 +144,23 @@ def _has_tradeoff_evidence(excerpt: str, context: str) -> bool:
         and not CLOSED_RESOLUTION_RE.search(excerpt)
         and (_cjk_trigrams(excerpt) & _cjk_trigrams(context)) - CHOICE_GENERIC_GRAMS
     )
+
+
+def _fixed_branch_evidence(text: str) -> list[str]:
+    """Return clauses that already select one branch of the H3 decision.
+
+    A shared invariant such as “不能同时释放路径和准备恢复” constrains all
+    branches equally. “不能把旧配置写回” or “必须读取刚启用的配置” instead
+    selects the winner and is not an open H3 choice.
+    """
+
+    hits: list[str] = []
+    for sentence in _sentences(text):
+        if "不能既" in sentence or "不得既" in sentence:
+            continue
+        if FIXED_BRANCH_RE.search(sentence):
+            hits.append(sentence)
+    return hits
 CHOICE_GENERIC_GRAMS = {
     "冲突时",
     "优先级",
@@ -251,11 +312,19 @@ def _design_errors(
         errors.append(f"{where} 的 reasoning_challenge.constraints 至少要有两条硬约束")
         constraints = []
     kinds: list[str] = []
+    constraint_ids: list[str] = []
     for index, item in enumerate(constraints):
         label = f"{where} reasoning_challenge.constraints[{index}]"
         if not isinstance(item, dict):
             errors.append(f"{label} 必须是对象")
             continue
+        constraint_id = _text(item.get("id"))
+        if not re.fullmatch(r"C[1-9][0-9]*", constraint_id):
+            errors.append(f"{label}.id 必须是 C1、C2 这类稳定编号")
+        elif constraint_id in constraint_ids:
+            errors.append(f"{label}.id 重复：{constraint_id}")
+        else:
+            constraint_ids.append(constraint_id)
         kind = _text(item.get("kind"))
         if kind not in CONSTRAINT_KINDS:
             errors.append(f"{label}.kind 不合法：{kind or '空'}")
@@ -266,6 +335,8 @@ def _design_errors(
                 errors.append(f"{label}.{key} 至少要有 8 个字符")
     if len(set(kinds)) < 2:
         errors.append(f"{where} 的 reasoning_challenge 至少要有两种不同约束类型")
+    if len(constraint_ids) < 2:
+        errors.append(f"{where} 的 reasoning_challenge 至少要有两个唯一约束编号")
     if len(_text(reasoning.get("why_interact"))) < 12:
         errors.append(f"{where} 的 reasoning_challenge.why_interact 必须说明约束如何相互作用")
     if len(_text(reasoning.get("prompt_excerpt"))) < 8:
@@ -313,6 +384,15 @@ def _design_errors(
         tradeoff = {}
     if len(_text(tradeoff.get("decision"))) < 8:
         errors.append(f"{where} 的 design_tradeoff.decision 至少要有 8 个字符")
+    decision_axis = _text(tradeoff.get("decision_axis"))
+    if decision_axis not in DECISION_AXES:
+        errors.append(
+            f"{where} 的 design_tradeoff.decision_axis 不合法："
+            f"{decision_axis or '空'}"
+        )
+    trigger = _text(tradeoff.get("trigger"))
+    if len(trigger) < 12:
+        errors.append(f"{where} 的 design_tradeoff.trigger 必须写清冲突触发条件")
     options = _text_list(tradeoff.get("options"))
     if len(set(options)) < 2:
         errors.append(f"{where} 的 design_tradeoff.options 至少要有两个不同方案")
@@ -326,24 +406,46 @@ def _design_errors(
         errors.append(f"{where} 的 design_tradeoff.context_excerpt 必须摘录触发取舍的真实业务条件")
     elif prompt and context_excerpt not in prompt:
         errors.append(f"{where} 的 design_tradeoff.context_excerpt 不在最终题面中")
+    if trigger and context_excerpt and trigger not in context_excerpt:
+        errors.append(f"{where} 的 design_tradeoff.trigger 必须逐字进入 context_excerpt")
     context_anchors = tradeoff.get("context_anchors")
-    if not isinstance(context_anchors, list) or not context_anchors:
-        errors.append(f"{where} 的 design_tradeoff.context_anchors 必须提供真实取舍条件的源码依据")
+    if not isinstance(context_anchors, list) or len(context_anchors) < 2:
+        errors.append(
+            f"{where} 的 design_tradeoff.context_anchors 至少要有两条源码依据，"
+            "分别支撑触发条件和至少一个方案边界"
+        )
     else:
+        anchor_supports: set[str] = set()
         for index, anchor in enumerate(context_anchors):
             label = f"{where} design_tradeoff.context_anchors[{index}]"
             if not isinstance(anchor, dict):
                 errors.append(f"{label} 必须是源码锚点对象")
                 continue
+            supports = _text(anchor.get("supports"))
+            if supports not in CONTEXT_ANCHOR_SUPPORTS:
+                errors.append(
+                    f"{label}.supports 必须是 "
+                    f"{'/'.join(sorted(CONTEXT_ANCHOR_SUPPORTS))}"
+                )
+            else:
+                anchor_supports.add(supports)
             if repo is None:
                 errors.append(f"{label} 缺少仓库，无法核对取舍条件")
                 continue
             anchor_errors, _ = _source_region(repo, anchor, label)
             errors.extend(anchor_errors)
+        if "trigger" not in anchor_supports:
+            errors.append(f"{where} 的 context_anchors 至少一条 supports=trigger")
+        if not ({"option_a", "option_b"} & anchor_supports):
+            errors.append(
+                f"{where} 的 context_anchors 至少一条支撑 option_a 或 option_b"
+            )
     analysis = tradeoff.get("option_analysis")
     if not isinstance(analysis, list):
         analysis = []
     analyzed: set[str] = set()
+    correctness_effects: list[str] = []
+    observable_results: list[str] = []
     for index, item in enumerate(analysis):
         label = f"{where} design_tradeoff.option_analysis[{index}]"
         if not isinstance(item, dict):
@@ -353,11 +455,58 @@ def _design_errors(
         if option not in options or option in analyzed:
             errors.append(f"{label}.option 必须唯一对应 options 中的真实方案")
         analyzed.add(option)
-        for key in ("benefit", "cost", "viable_when"):
+        for key in ("benefit", "cost", "viable_when", "correctness_effect", "observable_result"):
             if len(_text(item.get(key))) < 12:
-                errors.append(f"{label}.{key} 必须写清该方案的收益、代价和成立条件，不能只写可自行选择")
+                errors.append(
+                    f"{label}.{key} 必须写清方案在该冲突下实际会发生什么，"
+                    "不能只写收益、重试或结果不变量"
+                )
+        preserved = set(_text_list(item.get("preserves_constraint_ids")))
+        missing_constraints = set(constraint_ids) - preserved
+        unknown_constraints = preserved - set(constraint_ids)
+        if missing_constraints:
+            errors.append(
+                f"{label}.preserves_constraint_ids 没有覆盖全部 H1 约束："
+                f"{'、'.join(sorted(missing_constraints))}"
+            )
+        if unknown_constraints:
+            errors.append(
+                f"{label}.preserves_constraint_ids 引用了不存在的约束："
+                f"{'、'.join(sorted(unknown_constraints))}"
+            )
+        correctness_effect = _text(item.get("correctness_effect"))
+        observable_result = _text(item.get("observable_result"))
+        if correctness_effect:
+            correctness_effects.append(correctness_effect)
+        if observable_result:
+            observable_results.append(observable_result)
     if set(options) - analyzed or len(analyzed) < 2:
         errors.append(f"{where} 的 design_tradeoff.option_analysis 必须覆盖至少两个方案的实际代价")
+    if len(set(correctness_effects)) < len(options):
+        errors.append(f"{where} 的每个 H3 方案必须产生不同的正确性影响")
+    if len(set(observable_results)) < len(options):
+        errors.append(f"{where} 的每个 H3 方案必须有不同的可观察结果")
+    for key in (
+        "both_options_valid",
+        "choice_changes_correctness",
+        "prompt_keeps_choice_open",
+        "fixed_branch_excluded",
+    ):
+        if tradeoff.get(key) is not True:
+            errors.append(f"{where} 的 design_tradeoff.{key} 必须为 true")
+    false_guards = tradeoff.get("false_h3_guards")
+    if not isinstance(false_guards, dict):
+        errors.append(f"{where} 缺少 design_tradeoff.false_h3_guards")
+        false_guards = {}
+    for name in H3_FALSE_GUARDS:
+        if false_guards.get(name) is not False:
+            errors.append(
+                f"{where} 的 design_tradeoff.false_h3_guards.{name} 必须为 false"
+            )
+    if len(_text(tradeoff.get("false_h3_counterexample"))) < 12:
+        errors.append(
+            f"{where} 的 false_h3_counterexample 必须写明一个看似取舍但已提前裁决的反例"
+        )
     if len(_text(tradeoff.get("decision_impact"))) < 12:
         errors.append(f"{where} 的 design_tradeoff.decision_impact 必须说明选择如何影响数据语义或处理链路")
     if tradeoff.get("implementation_not_prescribed") is not True:
@@ -365,6 +514,11 @@ def _design_errors(
     tradeoff_excerpt = _text(tradeoff.get("prompt_excerpt"))
     if len(tradeoff_excerpt) < 8:
         errors.append(f"{where} 的 design_tradeoff.prompt_excerpt 缺失")
+    elif fixed_hits := _fixed_branch_evidence(tradeoff_excerpt):
+        errors.append(
+            f"{where} 的 design_tradeoff.prompt_excerpt 已经预先选定分支："
+            f"{fixed_hits[0]}；H3 只能固定共同不变量，不能固定由哪一方案获胜"
+        )
     elif not _has_tradeoff_evidence(tradeoff_excerpt, context_excerpt):
         errors.append(
             f"{where} 的 design_tradeoff.prompt_excerpt 必须留下真实选择权："

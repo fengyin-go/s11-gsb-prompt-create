@@ -44,18 +44,21 @@ class DifficultyContractTest(unittest.TestCase):
             "导出中断后保留上一份完整订单数据集，重试只补写缺失记录，"
             "已发布批次不得回退。"
             "分析导出中心必须读取同一份已发布订单数据集并保留来源批次。"
-            "恢复边界请根据现有数据语义自行设计，但下游不得看到半成品。"
+            "迟到订单与历史更正落在已发布窗口时，补算的生效顺序会影响下游读取，"
+            "补算期间只能发布一份完整订单数据集，不能把新旧窗口结果混在同一文件中。"
         )
         self.design = {
-            "version": 2,
+            "version": 3,
             "reasoning_challenge": {
                 "constraints": [
                     {
+                        "id": "C1",
                         "kind": "transaction_consistency",
                         "statement": "订单明细与来源批次必须同时可见",
                         "failure_if_omitted": "下游会读到没有来源的明细",
                     },
                     {
+                        "id": "C2",
                         "kind": "failure_recovery",
                         "statement": "中断后只能补写缺失记录，不能覆盖完整版本",
                         "failure_if_omitted": "重试会回退已经可用的数据结果",
@@ -84,24 +87,72 @@ class DifficultyContractTest(unittest.TestCase):
             },
             "design_tradeoff": {
                 "decision": "恢复边界按采集时间还是业务时间确定",
+                "decision_axis": "effective_time",
+                "trigger": "迟到订单与历史更正落在已发布窗口",
                 "options": ["按采集时间恢复", "按业务时间恢复"],
                 "outcome_invariant": "恢复完成后下游只能看到完整订单数据集",
                 "why_open": "两种边界都可行，题面只固定可观察结果，不选择内部键。",
-                "context_excerpt": "导出中断后保留上一份完整订单数据集，重试只补写缺失记录",
-                "context_anchors": [{"path": "src/orders.py", "start_line": 2, "end_line": 2,
-                                     "excerpt": "解析订单数据并生成已发布订单数据集"}],
+                "context_excerpt": (
+                    "迟到订单与历史更正落在已发布窗口时，补算的生效顺序会影响下游读取，"
+                    "补算期间只能发布一份完整订单数据集，不能把新旧窗口结果混在同一文件中。"
+                ),
+                "context_anchors": [
+                    {
+                        "path": "src/orders.py",
+                        "start_line": 2,
+                        "end_line": 2,
+                        "supports": "trigger",
+                        "excerpt": "解析订单数据并生成已发布订单数据集",
+                    },
+                    {
+                        "path": "src/orders.py",
+                        "start_line": 3,
+                        "end_line": 3,
+                        "supports": "option_a",
+                        "excerpt": "return []",
+                    },
+                    {
+                        "path": "src/orders.py",
+                        "start_line": 3,
+                        "end_line": 3,
+                        "supports": "option_b",
+                        "excerpt": "return []",
+                    },
+                ],
                 "option_analysis": [
                     {"option": "按采集时间恢复", "benefit": "顺序读取采集批次可以减少历史扫描范围",
                      "cost": "迟到订单需另行补算否则会遗漏业务窗口",
-                     "viable_when": "采集顺序稳定且存在迟到记录补偿路径"},
+                     "viable_when": "采集顺序稳定且存在迟到记录补偿路径",
+                     "preserves_constraint_ids": ["C1", "C2"],
+                     "correctness_effect": "按采集顺序推进会缩小扫描范围，但迟到更正必须单独补偿",
+                     "observable_result": "补算文件先落采集序列，再生成独立的业务窗口更正清单"},
                     {"option": "按业务时间恢复", "benefit": "直接覆盖受影响的业务窗口便于核对结果",
                      "cost": "历史更正会扩大重新扫描与去重处理范围",
-                     "viable_when": "业务时间可靠且可以承担历史窗口重算成本"},
+                     "viable_when": "业务时间可靠且可以承担历史窗口重算成本",
+                     "preserves_constraint_ids": ["C1", "C2"],
+                     "correctness_effect": "按业务窗口重算会扩大扫描范围，但能直接校正历史业务口径",
+                     "observable_result": "补算文件按受影响业务窗口生成完整快照并保留来源批次"},
                 ],
+                "both_options_valid": True,
+                "choice_changes_correctness": True,
+                "prompt_keeps_choice_open": True,
+                "fixed_branch_excluded": True,
+                "false_h3_guards": {
+                    "one_branch_violates_constraints": False,
+                    "fixed_resolution_in_prompt": False,
+                    "implementation_only": False,
+                    "retry_or_error_message_only": False,
+                    "display_only": False,
+                    "single_result_invariant_only": False,
+                },
+                "false_h3_counterexample": (
+                    "题面先写迟到更正必须采用业务时间，再追加由设计者选择恢复边界"
+                ),
                 "decision_impact": "恢复时间轴改变迟到订单的补算范围和扫描成本",
                 "implementation_not_prescribed": True,
                 "prompt_excerpt": (
-                    "恢复边界请根据现有数据语义自行设计，但下游不得看到半成品。"
+                    "迟到订单与历史更正落在已发布窗口时，补算的生效顺序会影响下游读取，"
+                    "补算期间只能发布一份完整订单数据集，不能把新旧窗口结果混在同一文件中。"
                 ),
             },
             "medium_counterexample": {
@@ -150,7 +201,7 @@ class DifficultyContractTest(unittest.TestCase):
             "difficulty_design": self.design,
         }
         self.topic = {
-            "difficulty_contract_version": 2,
+            "difficulty_contract_version": 3,
             "task_plan": [self.plan],
         }
         self.record = {
@@ -174,7 +225,7 @@ class DifficultyContractTest(unittest.TestCase):
         for case in REJECTIONS:
             with self.subTest(case=case["task_id"]):
                 topic = {
-                    "difficulty_contract_version": 2,
+                    "difficulty_contract_version": 3,
                     "task_plan": [{
                         "sequence": case["sequence"],
                         "task_type": case["task_type"],
@@ -209,7 +260,7 @@ class DifficultyContractTest(unittest.TestCase):
     def test_prompt_excerpt_must_reach_final_prompt(self):
         record = copy.deepcopy(self.record)
         record["提示词"] = record["提示词"].replace(
-            "恢复边界请根据现有数据语义自行设计", "恢复边界采用固定实现"
+            "补算的生效顺序会影响下游读取", "补算采用固定业务时间边界"
         )
         self.assertTrue(any("prompt_excerpt 不在最终题面中" in error for error in self.errors(record=record)))
 
@@ -247,11 +298,16 @@ class DifficultyContractTest(unittest.TestCase):
         topic = copy.deepcopy(self.topic)
         tradeoff = topic["task_plan"][0]["difficulty_design"]["design_tradeoff"]
         excerpt = "迟到订单与历史更正落在已发布窗口，补算期间导出仍读取完整订单数据集"
+        tradeoff["trigger"] = "迟到订单与历史更正落在已发布窗口"
         tradeoff["prompt_excerpt"] = excerpt
         tradeoff["context_excerpt"] = excerpt
         record = copy.deepcopy(self.record)
-        record["提示词"] = record["提示词"].replace(
-            "恢复边界请根据现有数据语义自行设计，但下游不得看到半成品。", excerpt + "。"
+        record["提示词"] = (
+            "请解析订单数据并生成已发布订单数据集。"
+            "导出中断后保留上一份完整订单数据集，重试只补写缺失记录，已发布批次不得回退。"
+            "分析导出中心必须读取同一份已发布订单数据集并保留来源批次。"
+            + excerpt
+            + "。"
         )
         self.assertEqual(self.errors(topic, record), [])
 
@@ -324,6 +380,67 @@ class DifficultyContractTest(unittest.TestCase):
         )
         errors = self.errors(topic, record)
         self.assertTrue(any("又在另一句被固定为一种结果" in error for error in errors))
+
+    def test_every_h3_option_must_preserve_all_h1_constraints(self):
+        topic = copy.deepcopy(self.topic)
+        analysis = topic["task_plan"][0]["difficulty_design"]["design_tradeoff"][
+            "option_analysis"
+        ]
+        analysis[1]["preserves_constraint_ids"] = ["C1"]
+        errors = self.errors(topic)
+        self.assertTrue(
+            any("没有覆盖全部 H1 约束" in error and "C2" in error for error in errors)
+        )
+
+    def test_new_config_fixed_branch_is_not_h3(self):
+        topic = copy.deepcopy(self.topic)
+        tradeoff = topic["task_plan"][0]["difficulty_design"]["design_tradeoff"]
+        excerpt = (
+            "检查点缓存中的旧配置与刚启用的状态后端配置冲突时，"
+            "恢复写入侧只能读取一个可核对的状态后端配置版本数据，"
+            "不能把旧状态大小写回当前记录。"
+        )
+        tradeoff["trigger"] = "检查点缓存中的旧配置与刚启用的状态后端配置冲突"
+        tradeoff["context_excerpt"] = excerpt
+        tradeoff["prompt_excerpt"] = excerpt
+        record = copy.deepcopy(self.record)
+        record["提示词"] = (
+            "请解析订单数据并生成已发布订单数据集。"
+            "导出中断后保留上一份完整订单数据集，重试只补写缺失记录，已发布批次不得回退。"
+            "分析导出中心必须读取同一份已发布订单数据集并保留来源批次。"
+            + excerpt
+        )
+        errors = self.errors(topic, record)
+        self.assertTrue(any("已经预先选定分支" in error for error in errors))
+
+    def test_protected_snapshot_only_branch_is_not_h3(self):
+        topic = copy.deepcopy(self.topic)
+        tradeoff = topic["task_plan"][0]["difficulty_design"]["design_tradeoff"]
+        excerpt = (
+            "未被快照清单引用的目录仍被过期检查点引用时，"
+            "清理结果校验只能遵循一套最终确认的状态快照数据清单，"
+            "不能把待恢复快照当成可删除文件，处理来源发生冲突。"
+        )
+        tradeoff["trigger"] = "未被快照清单引用的目录仍被过期检查点引用"
+        tradeoff["context_excerpt"] = excerpt
+        tradeoff["prompt_excerpt"] = excerpt
+        record = copy.deepcopy(self.record)
+        record["提示词"] = (
+            "请解析订单数据并生成已发布订单数据集。"
+            "导出中断后保留上一份完整订单数据集，重试只补写缺失记录，已发布批次不得回退。"
+            "分析导出中心必须读取同一份已发布订单数据集并保留来源批次。"
+            + excerpt
+        )
+        errors = self.errors(topic, record)
+        self.assertTrue(any("已经预先选定分支" in error for error in errors))
+
+    def test_completion_precedence_positive_sample_remains_open(self):
+        excerpt = (
+            "清理回执与恢复事件同时更新同一检查点时，作业处理时必须采用一套已确认的"
+            "检查点记录版本数据，不能既把路径释放又准备新的恢复，这就是需要裁决的版本冲突。"
+        )
+        self.assertEqual(difficulty_contract._fixed_branch_evidence(excerpt), [])
+        self.assertTrue(difficulty_contract._has_tradeoff_evidence(excerpt, excerpt))
 
     def test_difficulty_note_cannot_override_g16(self):
         from check_prompt_g16 import check

@@ -60,12 +60,12 @@ class OpportunityMapTest(unittest.TestCase):
                 "family": f"新增能力-{index}",
                 "angle": mode,
                 "domain_fit": {"prompt_main_request": self.plans_prompt(mode)},
-                "difficulty_design": {"version": 2},
+                "difficulty_design": {"version": 3},
             })
         self.topic_map = {
             "version": 1,
             "profile": "gsb-semantic-v2",
-            "difficulty_contract_version": 2,
+            "difficulty_contract_version": 3,
             "type_policy": "capacity-first",
             "domain": "数据工程",
             "subdirection": "数据采集、爬虫与RPA",

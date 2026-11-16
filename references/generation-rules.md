@@ -232,14 +232,14 @@ python3 <skill>/scripts/check_prompt_g16.py \
 在 `$cc-gsb-create` 的 `scripts/gsb_difficulty.py`，本脚本直接加载它（见输出里的 `judge`
 字段）。S11 只叠加两类有真实回执来源的薄层：负向硬闸做降级，2026-11-15 正样本校准
 补充平台已认可的显式开放裁决句；两个方案、结果不变量和同轴预先裁决仍由
-`difficulty_contract.py` v2 审计。G19 的「中等」词面读数与多模块读数定义在
+`difficulty_contract.py` v3 审计。G19 的「中等」词面读数与多模块读数定义在
 `check_prompt_g16.py` 里（`MEDIUM_FLOOR_PATTERNS` / `MULTI_MODULE_EXTRA_PATTERNS`），
 只做提示与 `--strict` 自查，不参与 G16 硬判。它返回 `ok: true` 只说明词面上
 达到对应类型的最低项数，生成方仍要按上面的特征逐条自查。被脚本拦下的条目优先换角度重出，
 不许只加限定词，也不许用
 `--allow-gate-failure` 硬塞。脚本命中后必须重写题面或更换题位，并用
 `difficulty_design` 证明 H1/H2/H3；工作簿备注不再具备放行效力。平台词面 G16 与
-S11 v2 结构化契约必须同时通过，不能用一方替代另一方。
+S11 v3 结构化契约必须同时通过，不能用一方替代另一方。
 
 默认（不带 `--strict`）硬拦 G16，以及 2026-10-07 平台真实回执确认的两种 G19 高危形状：
 「排序 + 分页 + 回到第一页/空态说明」和「空态提示 + 重新登记入口 + 导出失败重试」。
@@ -254,25 +254,33 @@ G19 疑似不达中等、硬证据只出现在末句（「主诉求还是列表�
 被平台按 P4/P5 判废。逐题情况与改造方向固定在
 [difficulty-hardening.md](difficulty-hardening.md)。现行规则：
 
-- 新 topic map 必须有 `difficulty_contract_version: 2`。
+- 新 topic map 必须有 `difficulty_contract_version: 3`。
 - 每个 `task_plan[]` 必须有 `difficulty_design`，不能用备注或最终题面倒填。
-- H1 `reasoning_challenge` 至少两条不同类别的硬约束，并说明相互作用和省略后的失败后果。
+- H1 `reasoning_challenge` 至少两条不同类别的硬约束，每条有 `C1`、`C2` 等稳定编号，
+  并说明相互作用和省略后的失败后果。
 - H2 `module_integration` 至少一个第二模块真正消费、写入、持久化或编排数据产物；纯列表、
   详情、概览、看板展示不算。
-- H3 `design_tradeoff` 至少两个可行方案，题面要明确留下“哪份 / 哪一版 / 谁优先 / 采用
-  哪种方案由设计者决定”的选择权，不能只用历史兼容、失败重试或结果不变量充当取舍。
+- H3 `design_tradeoff` 至少两个可行方案；每个方案必须通过 `preserves_constraint_ids`
+  覆盖全部 H1 约束，并分别写清不同的 `correctness_effect` 与 `observable_result`。
+- H3 必须填写 `decision_axis`、`trigger`、`both_options_valid`、
+  `choice_changes_correctness`、`prompt_keeps_choice_open`、`fixed_branch_excluded`、
+  `false_h3_guards` 和 `false_h3_counterexample`；题面只保留冲突和共同不变量，不预先
+  规定“必须用新版本”“必须保留引用快照”“不能写回旧值”等分支胜负。
 - 同一冲突轴不能在另一句预先固定。例如一句写“检查点冲突时以最新有效检查点为准”，
   另一句又让设计者决定“历史检查点和当前检查点谁优先”，平台会按 H3 不成立判废。
 - H1/H2/H3 各自的 `prompt_excerpt` 必须逐字出现在最终题面；`module_anchors` 至少跨两个
   不同源码文件、两个模块且原文和行号可回查。
-- `anti_patterns` 的七项必须全为 `false`。题面连续出现四个以上“先/再/逐项/依次”等过程词，
-  同时没有开放判断或结果不变量时直接拒绝。
+- `context_anchors` 至少两条，一条 `supports=trigger`，另一条支撑 `option_a` 或
+  `option_b`；只指向 `STATUS_ORDER`、函数名或通用 CRUD 代码不算真实取舍依据。
+- `anti_patterns` 的七项必须全为 `false`；`false_h3_guards` 的六项也必须全为 `false`。
+  题面连续出现四个以上“先/再/逐项/依次”等过程词，同时没有开放判断或结果不变量时直接拒绝。
 
 2026-11-15 `cc10010 / b1113-01` 的 8 条真实 `QC_PASSED` 样本已经证明：
 “由你判断”“由你权衡后确定”“请自行选择”“优先级由你决定”“由你决定采用哪份”
 都是可被平台识别的 H3 证据；而 14/35 两条 H1/H2 成立但 H3 被固定答案、兼容要求或
-中断续做替代，最终 `DISCARDED`。因此 S11 新批次统一使用
-`difficulty_contract_version: 2`，即使平台 G16 基础词面对普通类型只要求两项特征，
+中断续做替代，最终 `DISCARDED`。2026-11-16 `dfzr10012` 又补充了
+`14-bugfix` 正样本和 `10/11` 两条“H1/H2 成立但 H3 已预先裁决”的反样本，因此
+S11 新批次统一使用 `difficulty_contract_version: 3`，即使平台 G16 基础词面对普通类型只要求两项特征，
 出题侧仍要逐题审计 H1/H2/H3 三项。词面已经出现“由你决定采用哪份”时，
 `check_prompt_g16.py` 会记录正向校准，但 `difficulty_contract.py` 仍会检查两个方案、
 结果不变量和同轴预先裁决。

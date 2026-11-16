@@ -18,7 +18,7 @@ class PreviewAdmissionTest(unittest.TestCase):
             with self.subTest(task_type=task_type):
                 result = preview.check({
                     "records": [{"子文件夹名称": f"demo-01-{slug}", "任务类型": task_type, "提示词": prompt}],
-                    "topic_map": {"domain": "数据工程", "difficulty_contract_version": 2,
+                    "topic_map": {"domain": "数据工程", "difficulty_contract_version": 3,
                                   "task_plan": [{"sequence": 1, "slug": slug, "task_type": task_type,
                                                  "domain_fit": {"prompt_main_request": prompt}}]},
                 }, Path.cwd())

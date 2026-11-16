@@ -16,11 +16,40 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
 - H3 不再接受“历史兼容 / 固定优先级 / 结果不变量”冒充设计取舍；
 - H3 必须在同一冲突轴上保留两个可行裁决，题面通过业务矛盾体现，不显式委托设计者；
 - 同一业务对象不能在另一句预先固定“以谁为准”，随后又要求设计者选择；
-- 词面 G16 只负责平台下限和已知正样本校准，结构化 v2 仍要求 H1/H2/H3 全部可审计。
+- 词面 G16 只负责平台下限和已知正样本校准，结构化 H3 仍要求 H1/H2/H3 全部可审计。
 
 上述显式选择句只解释历史平台校准，不再作为生成范例。新题禁止“由你判断”“由你权衡”
 “请自行选择”等句式。关键是冲突对象明确、两个方案都可行、选择会影响数据链路，
 且题面没有把内部方案提前写死；不能把某个词面短语当作 H3 通行证。
+
+### 2026-11-16 H3 v3 正反校准
+
+`dfzr10012 / b1115-01` 的平台最新只读回执提供了更直接的三方对照：
+
+| 记录 | 平台结果 | H1 | H2 | H3 | 关键事实 |
+|---|---|---|---|---|---|
+| `14-bugfix` | `QC_PASSED` | 成立 | 成立 | 成立 | 清理回执与恢复事件同时更新同一检查点时，存在两个都成立、但下游结果不同的终态裁决 |
+| `10-development` | `DISCARDED` | 4 条成立 | 成立 | 不成立 | 题面已经规定“不能把待恢复快照当成可删除文件”，第二个清理方案被 H1 排除 |
+| `11-bugfix` | `DISCARDED` | 3 条成立 | 成立 | 不成立 | 题面已经规定“不能把旧状态大小写回当前记录”，剩下的是单一版本约束，不是方案裁决 |
+
+这组数据证明：H3 的关键不是“题面写了冲突”，而是**两个方案在同一 H1 约束集合下都合法**，
+且选择哪一个会改变数据语义、终态或下游可观察结果。只要有一个方案必须违反 H1、H2 或共同
+不变量才能执行，它就不是备选方案，只是错误方案。`14-bugfix` 可采用临时类级锁串行化，
+也可采用版本号 CAS/单写者队列；机制不同，但都必须得到同一确认版本。`10/11` 则不是机制
+选择，而是业务对象已经被题面上的硬规则裁决。
+
+从 v3 起，每个 `design_tradeoff` 还必须显式填写：
+
+- `decision_axis`：冲突轴；
+- `trigger`：哪份数据、哪个事件或哪个版本发生相遇；
+- `both_options_valid`、`choice_changes_correctness`、`prompt_keeps_choice_open`、`fixed_branch_excluded`；
+- `option_analysis[].preserves_constraint_ids`：两种方案都必须覆盖全部 H1 约束编号；
+- `option_analysis[].correctness_effect` 和 `observable_result`：两种方案分别改变什么、用户分别看到什么；
+- `false_h3_guards`：显式排除“一个方案违反约束”“题面提前裁决”“只是实现重构”“只是重试/报错提示”“只是展示变化”“只有一个结果不变量”六类假 H3；
+- `context_anchors` 至少两条，一条 `supports=trigger`，另一条支撑 `option_a` 或 `option_b`。
+
+题面只需要承载“冲突发生的业务事实”和“两种方案共同必须守住的结果边界”，不应把内部方案
+逐条写在文末。`false_h3_counterexample` 必须记录本题最容易伪装成 H3 的固定裁决句。
 
 ### 自然业务条件范例
 
@@ -91,15 +120,17 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "reasoning_challenge": {
     "constraints": [
       {
+        "id": "C1",
         "kind": "transaction_consistency",
         "statement": "发布事件的版本记录和导出快照必须同时可见",
         "failure_if_omitted": "只写事件时下游会读到半个版本"
       },
       {
+        "id": "C2",
         "kind": "failure_recovery",
         "statement": "发布中断后只能继续未完成批次，不能覆盖上一次完整快照",
         "failure_if_omitted": "重试会把已可用的数据结果回退"
@@ -123,25 +154,58 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
   },
   "design_tradeoff": {
     "decision": "发布中断时以采集时间还是业务时间确定恢复边界",
+    "decision_axis": "effective_time",
+    "trigger": "迟到订单与历史更正落在已发布窗口",
     "options": ["按采集时间恢复", "按业务时间恢复"],
     "outcome_invariant": "恢复后下游只能看到完整版本，不能看到半成品",
     "why_open": "两种边界都能成立，题面只固定可观察结果，不替设计者选择内部键。",
-    "context_excerpt": "迟到订单可能更正已发布窗口，恢复时须保留完整旧版本并补齐受影响的数据。",
+    "context_excerpt": "迟到订单与历史更正落在已发布窗口时，恢复边界会改变补算范围，但下游始终只能读取一份完整数据集。",
     "context_anchors": [
-      {"path": "backend/app/services/orders.py", "start_line": 40, "end_line": 52,
-       "excerpt": "构建订单版本文档并写入发布记录"}
+      {
+        "path": "backend/app/services/orders.py",
+        "start_line": 40,
+        "end_line": 52,
+        "supports": "trigger",
+        "excerpt": "构建订单版本文档并写入发布记录"
+      },
+      {
+        "path": "backend/app/services/exports.py",
+        "start_line": 30,
+        "end_line": 45,
+        "supports": "option_a",
+        "excerpt": "导出已发布订单数据集"
+      }
     ],
     "option_analysis": [
       {"option": "按采集时间恢复", "benefit": "按采集顺序恢复可以缩小扫描范围",
        "cost": "迟到更正需要独立补算受影响业务窗口",
-       "viable_when": "采集顺序可靠且具有迟到订单补偿机制"},
+       "viable_when": "采集顺序可靠且具有迟到订单补偿机制",
+       "preserves_constraint_ids": ["C1", "C2"],
+       "correctness_effect": "按采集顺序推进可缩小恢复范围，但迟到更正必须走独立补算链路",
+       "observable_result": "恢复文件按采集顺序生成，并附一份受影响的迟到业务窗口清单"},
       {"option": "按业务时间恢复", "benefit": "按业务窗口重算可以直接核对历史完整性",
        "cost": "历史窗口重新扫描会增加去重与计算成本",
-       "viable_when": "业务时间可靠且能够承担历史窗口重算成本"}
+       "viable_when": "业务时间可靠且能够承担历史窗口重算成本",
+       "preserves_constraint_ids": ["C1", "C2"],
+       "correctness_effect": "按业务时间重算会扩大扫描范围，但历史口径可以在同一恢复结果中校正",
+       "observable_result": "恢复文件按受影响业务窗口生成，并携带同一版本和来源批次"}
     ],
+    "both_options_valid": true,
+    "choice_changes_correctness": true,
+    "prompt_keeps_choice_open": true,
+    "fixed_branch_excluded": true,
+    "false_h3_guards": {
+      "one_branch_violates_constraints": false,
+      "fixed_resolution_in_prompt": false,
+      "implementation_only": false,
+      "retry_or_error_message_only": false,
+      "display_only": false,
+      "single_result_invariant_only": false
+    },
+    "false_h3_counterexample": "先规定迟到更正必须采用业务时间，再提出恢复边界由设计者选择",
     "decision_impact": "时间轴选择影响恢复扫描范围与迟到更正的数据完整性",
     "implementation_not_prescribed": true,
-    "prompt_excerpt": "迟到订单与历史更正可能落在已发布窗口，补算期间导出仍须读取完整订单数据集，不能把新旧口径混在同一文件中。"
+    "prompt_excerpt": "迟到订单与历史更正落在已发布窗口时，恢复边界会改变补算范围，但下游始终只能读取一份完整数据集。"
   },
   "medium_counterexample": {
     "generic_task": "给订单表增加导出按钮并保持列表与详情一致",
@@ -199,13 +263,14 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
 存在数据集的锚点冒充迟到更正依据。实际 `context_anchors` 必须支持实际触发条件，人工复核
 锚点语义，脚本只核验路径、行号和原文，不能自动证明成本分析属实。
 
-- `difficulty_contract_version` 必须为 `2`，每个 plan 的 `difficulty_design.version` 必须为 `2`。
+- `difficulty_contract_version` 必须为 `3`，每个 plan 的 `difficulty_design.version` 必须为 `3`。
 - 完整 `domain_chain` 只能进入主请求一次；H1/H2/H3 只能引用其中的具体输入、产物和观察，
   不得换称呼后再次完整复述。
-- `reasoning_challenge.constraints` 至少两条，`kind` 至少两种不同值；每条都写 `failure_if_omitted`。
+- `reasoning_challenge.constraints` 至少两条，每条具有唯一 `C1`、`C2` 等 `id`，`kind` 至少两种不同值；每条都写 `failure_if_omitted`。
 - `module_integration.secondary_modules` 至少一个，`role` 必须是消费、写入、下游、审计、持久化、编排、通知或授权角色；列表/详情/概览等纯展示角色不允许。
-- `design_tradeoff.options` 至少两个不同且都可行的裁决，`outcome_invariant` 说明两种方案都必须守住的可观察结果，`implementation_not_prescribed` 必须为 `true`。
-- `context_excerpt` 至少 12 字且逐字进入题面，说明真实触发条件；`context_anchors` 至少一条可回查的源码依据。`option_analysis` 必须逐一对应所有 options，各写至少 12 字的 `benefit`、`cost`、`viable_when`；`decision_impact` 至少 12 字，写清数据语义或处理链路的实际影响。这些是最低可审计结构，不是凑字数标准。
+- `design_tradeoff.options` 至少两个不同且都可行的裁决，`decision_axis` 来自允许的冲突轴枚举，`trigger` 至少 12 字且逐字进入 `context_excerpt`，`outcome_invariant` 说明两种方案都必须守住的可观察结果，`implementation_not_prescribed` 必须为 `true`。
+- `context_excerpt` 至少 12 字且逐字进入题面；`context_anchors` 至少两条，一条 `supports=trigger`，另一条支撑 `option_a` 或 `option_b`，均须可回查。`option_analysis` 必须逐一对应所有 options，各写至少 12 字的 `benefit`、`cost`、`viable_when`、`correctness_effect`、`observable_result`，并通过 `preserves_constraint_ids` 覆盖全部 H1 约束编号；两个方案的 `correctness_effect` 和 `observable_result` 必须不同。`decision_impact` 至少 12 字，写清数据语义或处理链路的实际影响。
+- `both_options_valid`、`choice_changes_correctness`、`prompt_keeps_choice_open`、`fixed_branch_excluded` 必须为 `true`；`false_h3_guards` 的六项必须全为 `false`；`false_h3_counterexample` 必须写清本题最容易伪装成 H3 的固定裁决。
 - `design_tradeoff.prompt_excerpt` 必须逐字进入题面，用具体业务条件承载同一未定冲突轴并与 `context_excerpt` 对应；只写兼容、回滚、重试、结果不变量或固定“以谁为准”无效。不要求选择权声明，显式委托句由表达闸拒绝。词面检测只筛查证据形态，不能替代人工审查两个方案是否真实可行。
 - 同一冲突轴不得在题面另一句被固定为唯一内部方案；用户规定的结果边界不等于内部方案。发现设计卡与题面矛盾时重审该轴，不能追加一句委托设计者来制造开放性。
 - `hard_evidence` 至少一项，必须来自统一 G16 判据的硬证据组。
@@ -217,8 +282,9 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
 ## 自检顺序
 
 1. 先生成 H1/H2/H3 设计，不从最终题面倒填。
-2. 用真实源码抄两条锚点，确认它们不是同一个模块的两个视图。
+2. 用真实源码抄两条 H3 锚点：一条证明触发条件，另一条证明至少一个方案边界；再确认它们不是同一个模块的两个视图。
 3. 写题面时只固定输入、输出、失败后果和兼容边界，不固定内部算法、批次实现、页序或字段名，除非它们是真实既有契约。H3 的业务矛盾在主任务附近自然展开，不放到末尾补一句；内部方案分析不进入题面。任何契约失败都通过重写业务段落解决，禁止追加只用于命中检查器的条件句。
 4. 样稿先跑 `check_prompt_preview.py` 并人工核对领域与真实 H3，不能只跑表达和类型检查。正式写表仍跑 `check_difficulty_contract.py`、G16/G19、领域及其余全量闸。新增的取舍条件/成本字段为加固必填项，旧批次重写时补齐真实依据；不自动回填或给历史证据补造结论。
-5. 如果 G16/G19 命中，必须换主任务或题位重出；不能补备注、加形容词或只换同义词。
-6. 将本批 13 条和 `cc10010` 的 14/35 判废形状作为反例自查：若新题仍能概括成“单页状态/列表/导出一致 + 过程步骤已给定”，或 H3 只有一个被预先固定的答案，直接淘汰。
+5. 对每个 H3 逐项回答：方案 A 是否满足全部 H1？方案 B 是否也满足全部 H1？选择不同方案后，数据库终态、数据版本、下游文件或用户可见结果是否不同？如果任一答案是否定，换题，不补第三段。
+6. 如果 G16/G19 命中，必须换主任务或题位重出；不能补备注、加形容词或只换同义词。
+7. 将本批 13 条、`cc10010` 的 14/35，以及 `dfzr10012` 的 `14`（正）、`10/11`（反）作为校准：若新题仍能概括成“单页状态/列表/导出一致 + 过程步骤已给定”，或两个 H3 方案中有一个违反 H1，直接淘汰。

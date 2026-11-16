@@ -9,7 +9,7 @@
   "domain": "数据工程",
   "subdirection": "数仓与数据湖",
   "base_commit": "最终已推送的40位SHA",
-  "difficulty_contract_version": 2,
+  "difficulty_contract_version": 3,
   "max_capacity": 20,
   "topics": [
     {
@@ -33,15 +33,17 @@
       "family": "新增能力",
       "angle": "基于真实代码选择的独特切入点",
       "difficulty_design": {
-        "version": 2,
+        "version": 3,
         "reasoning_challenge": {
           "constraints": [
             {
+              "id": "C1",
               "kind": "transaction_consistency",
               "statement": "订单明细与来源批次必须同时可见",
               "failure_if_omitted": "下游会读到没有来源的明细"
             },
             {
+              "id": "C2",
               "kind": "failure_recovery",
               "statement": "导出中断后只能补写缺失记录，不能覆盖上一份完整文件",
               "failure_if_omitted": "重试会回退已经可用的数据结果"
@@ -65,11 +67,64 @@
         },
         "design_tradeoff": {
           "decision": "恢复边界按采集时间还是业务时间确定",
+          "decision_axis": "effective_time",
+          "trigger": "迟到订单与历史更正落在已发布窗口",
           "options": ["按采集时间恢复", "按业务时间恢复"],
           "outcome_invariant": "恢复完成后下游只能看到完整订单明细数据集",
           "why_open": "两种边界都可行，题面只固定可观察结果，不替设计者选择内部键。",
+          "context_excerpt": "迟到订单与历史更正落在已发布窗口时，恢复边界会改变补算范围，但下游始终只能读取一份完整订单明细数据集。",
+          "context_anchors": [
+            {
+              "path": "src/orders.py",
+              "start_line": 12,
+              "end_line": 20,
+              "supports": "trigger",
+              "excerpt": "解析订单字段并生成明细记录"
+            },
+            {
+              "path": "src/exports.py",
+              "start_line": 8,
+              "end_line": 15,
+              "supports": "option_a",
+              "excerpt": "导出文件保留来源批次和订单字段"
+            }
+          ],
+          "option_analysis": [
+            {
+              "option": "按采集时间恢复",
+              "benefit": "按采集顺序恢复可以缩小扫描范围",
+              "cost": "迟到更正需要独立补算受影响业务窗口",
+              "viable_when": "采集顺序可靠且存在迟到记录补偿机制",
+              "preserves_constraint_ids": ["C1", "C2"],
+              "correctness_effect": "按采集顺序推进会缩小扫描范围，但迟到更正必须独立补偿",
+              "observable_result": "恢复文件按采集顺序生成，并附迟到业务窗口清单"
+            },
+            {
+              "option": "按业务时间恢复",
+              "benefit": "按业务窗口重算可以直接核对历史完整性",
+              "cost": "历史窗口重新扫描会增加去重与计算成本",
+              "viable_when": "业务时间可靠且可以承担历史窗口重算成本",
+              "preserves_constraint_ids": ["C1", "C2"],
+              "correctness_effect": "按业务窗口重算会扩大扫描范围，但能直接校正历史口径",
+              "observable_result": "恢复文件包含受影响业务窗口并保留同一来源批次"
+            }
+          ],
+          "both_options_valid": true,
+          "choice_changes_correctness": true,
+          "prompt_keeps_choice_open": true,
+          "fixed_branch_excluded": true,
+          "false_h3_guards": {
+            "one_branch_violates_constraints": false,
+            "fixed_resolution_in_prompt": false,
+            "implementation_only": false,
+            "retry_or_error_message_only": false,
+            "display_only": false,
+            "single_result_invariant_only": false
+          },
+          "false_h3_counterexample": "先规定迟到更正必须采用业务时间，再要求设计者选择恢复边界",
+          "decision_impact": "恢复时间轴改变迟到订单的补算范围与下游文件内容",
           "implementation_not_prescribed": true,
-          "prompt_excerpt": "恢复边界请根据现有数据语义自行设计，但下游不得看到半成品。"
+          "prompt_excerpt": "迟到订单与历史更正落在已发布窗口时，恢复边界会改变补算范围，但下游始终只能读取一份完整订单明细数据集。"
         },
         "medium_counterexample": {
           "generic_task": "给订单列表增加导出按钮并保持列表和详情一致",
@@ -147,7 +202,7 @@
 
 最终题面除命中 topic、`domain_objects` 和 `domain_results` 外，还必须逐字写入 `domain_chain` 的输入、处理、输出、可观察结果以及前置的 `prompt_main_request`。脚本会核对源码锚点、连续原文和主请求位置；只出现业务名词、把领域句放在末尾或替换对象后仍是通用服务任务，都会在写表前被拦下。细节见 [domain-fit.md](domain-fit.md)。
 
-`difficulty_contract_version` 和 `task_plan[].difficulty_design` 是独立的第二个硬契约。H1/H2/H3 的题面摘录必须逐字出现在最终提示词，第二模块必须是真实数据流角色，设计取舍必须至少保留两个方案。v2 的 H3 题面摘录必须明确留下选择权，不能只写兼容要求、失败重试或结果不变量；同一冲突轴也不能在另一句被预先固定。完整字段、2026-11-15 判废复盘和 8 条平台通过样本见 [difficulty-hardening.md](difficulty-hardening.md)。
+`difficulty_contract_version` 和 `task_plan[].difficulty_design` 是独立的第二个硬契约。H1/H2/H3 的题面摘录必须逐字出现在最终提示词，第二模块必须是真实数据流角色，设计取舍必须至少保留两个方案。v3 要求两个方案都覆盖全部 H1 约束编号，分别产生不同的正确性影响和可观察结果；题面只能留下共同不变量，不能预先规定哪个分支获胜。`context_anchors` 至少两条，一条支撑触发条件，一条支撑至少一个方案边界。完整字段、`dfzr10012` 的 `14` 正样本与 `10/11` 反样本见 [difficulty-hardening.md](difficulty-hardening.md)。
 
 类型策略 `type_policy` 默认 `capacity-first`：30/30/30/5/5 只是建议，不因配比缩减最高有效容量。只有用户明确指定固定比例才设 `strict-ratio` 并由 s11_policy.allocate_counts 校验。validate_topic_map.py 始终校验 schema、合法类型、topic 席位与基准 SHA。扩容保留旧条目的 sequence、type、topic、family、angle、任务号与仓库，只向末尾追加。
 
