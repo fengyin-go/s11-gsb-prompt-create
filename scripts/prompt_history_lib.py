@@ -12,11 +12,21 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 HISTORY_DIR = SKILL_DIR / "data"
 HISTORY_FILE = HISTORY_DIR / "prompt_history.jsonl"
 
+# Recognition only: old boilerplate must not affect business-text similarity.
+_LEGACY_CONTEXT_BOILERPLATE = (
+    "只依据当前仓库、本轮题面和实际运行结果完成任务，"
+    "不读取其他会话、答案笔记或历史对话缓存。"
+)
+
 PREFIX_PATTERNS = [
     re.compile(r"^([A-Za-z]+-\d+)"),
     re.compile(r"^([A-Za-z]+\d+)"),
     re.compile(r"^(\d{4,})"),
 ]
+
+
+def strip_legacy_context_boilerplate(text: str) -> str:
+    return str(text or "").replace(_LEGACY_CONTEXT_BOILERPLATE, "")
 
 
 def ensure_history_dir() -> None:

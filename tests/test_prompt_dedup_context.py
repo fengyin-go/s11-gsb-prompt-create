@@ -9,7 +9,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from check_prompt_dedup import check, normalize, strip_scaffolding, text_overlap  # noqa: E402
-from review_contract import CONTEXT_STATEMENT  # noqa: E402
+from prompt_history_lib import _LEGACY_CONTEXT_BOILERPLATE as CONTEXT_STATEMENT  # noqa: E402
 
 
 def test_context_statement_is_excluded_from_batch_dedup() -> None:

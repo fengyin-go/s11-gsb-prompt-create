@@ -10,6 +10,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import review_contract
+from prompt_history_lib import _LEGACY_CONTEXT_BOILERPLATE
 
 
 HERE = Path(__file__).resolve().parent
@@ -26,7 +27,6 @@ class ReviewContractTest(unittest.TestCase):
             "请读取订单记录并生成已发布订单数据集。"
             "写入失败时保留上一份完整数据集，重试只补缺失记录。"
             "导出中心必须读取同一份已发布版本。"
-            + review_contract.CONTEXT_STATEMENT
         )
         self.requirement = {
             "id": "R1",
@@ -55,12 +55,6 @@ class ReviewContractTest(unittest.TestCase):
             "model_process_focus": [
                 "模型是否先构造失败写入，再验证旧版本没有被覆盖"
             ],
-            "context_isolation": {
-                "workspace_only": True,
-                "cross_session_memory": False,
-                "answer_notes": False,
-                "prompt_statement": review_contract.CONTEXT_STATEMENT,
-            },
             "style_focus": "用完整主谓句写清失败、修正和用户可检查的数据结果",
             "language_terms": [{"source": "OCC", "public": "提交时带上当前版本"}],
         }
@@ -127,11 +121,29 @@ class ReviewContractTest(unittest.TestCase):
         metadata = {"tasks": {record["子文件夹名称"]: record}}
         self.assertTrue(any("不能放环境或工具噪声" in error for error in self.problems(record, metadata)))
 
-    def test_context_isolation_statement_must_reach_prompt(self):
+    def test_context_source_restrictions_are_rejected(self):
         record = copy.deepcopy(self.record)
-        record["提示词"] = record["提示词"].replace(review_contract.CONTEXT_STATEMENT, "")
+        record["提示词"] += _LEGACY_CONTEXT_BOILERPLATE
         metadata = {"tasks": {record["子文件夹名称"]: record}}
-        self.assertTrue(any("上下文隔离声明不在最终题面中" in error for error in self.problems(record, metadata)))
+        self.assertTrue(any("上下文来源限制" in error for error in self.problems(record, metadata)))
+
+    def test_handoff_rejects_paraphrased_context_restrictions_and_vague_scaffolds(self):
+        for tail in ("仅限使用本项目代码完成开发。", "不要参考之前的对话。", "结果要关联另一个入口。"):
+            with self.subTest(tail=tail):
+                record = copy.deepcopy(self.record)
+                record["提示词"] += tail
+                self.assertTrue(self.problems(record))
+
+    def test_legacy_metadata_does_not_require_a_prompt_statement(self):
+        record = copy.deepcopy(self.record)
+        record["review_contract"]["context_isolation"] = {
+            "workspace_only": True,
+            "cross_session_memory": False,
+            "answer_notes": False,
+            "prompt_statement": _LEGACY_CONTEXT_BOILERPLATE,
+        }
+        metadata = {"tasks": {record["子文件夹名称"]: record}}
+        self.assertEqual(self.problems(record, metadata), [])
 
     def test_test_behavior_must_map_to_real_requirement(self):
         record = copy.deepcopy(self.record)

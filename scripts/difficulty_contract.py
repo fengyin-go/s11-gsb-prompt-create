@@ -12,8 +12,9 @@ integration, an open design tradeoff, and prompt excerpts that prove those
 decisions reached the final prompt. Version 2 uses the 2026-11-15 SOLO2
 calibration: eight accepted prompts all passed P4/P5, while two discarded
 prompts had H1/H2 but no genuine open H3 choice. The tradeoff check therefore
-requires an explicit choice axis and rejects a competing fixed-resolution rule
-on the same business object.
+requires a consequential choice axis and rejects a competing fixed-resolution
+rule on the same business object. New prompts express that axis through business
+conditions, not through instructions asking the implementer to choose.
 """
 
 from __future__ import annotations
@@ -80,6 +81,25 @@ CLOSED_RESOLUTION_RE = re.compile(
     r"(?:冲突|先后)[^。；]{0,40}(?:以|按)[^。；]{0,40}"
     r"(?:为准|为依据|作为[^。；]{0,12}依据|优先)"
 )
+BUSINESS_TENSION_RE = re.compile(
+    r"冲突|不同[^。；]{0,12}(?:口径|版本|批次|来源)|同一[^。；]{0,24}(?:多|两|重复)"
+    r"|多个[^。；]{0,20}(?:来源|规则|口径)|迟到|更正|补报|部分[^。；]{0,12}失败"
+    r"|(?:冻结|历史)[^。；]{0,30}(?:更新|变化|重算|修订)"
+    r"|周期[^。；]{0,20}(?:不同|只在)"
+)
+
+
+def _has_tradeoff_evidence(excerpt: str, context: str) -> bool:
+    # Keep old lexical calibration readable; prompt_style rejects delegation in
+    # new outputs. A natural excerpt must also share the actual context object.
+    if OPEN_CHOICE_RE.search(excerpt):
+        return True
+    return bool(
+        len(excerpt) >= 12
+        and BUSINESS_TENSION_RE.search(excerpt)
+        and not CLOSED_RESOLUTION_RE.search(excerpt)
+        and (_cjk_trigrams(excerpt) & _cjk_trigrams(context)) - CHOICE_GENERIC_GRAMS
+    )
 CHOICE_GENERIC_GRAMS = {
     "冲突时",
     "优先级",
@@ -300,16 +320,57 @@ def _design_errors(
         errors.append(f"{where} 的 design_tradeoff.outcome_invariant 缺失")
     if len(_text(tradeoff.get("why_open"))) < 12:
         errors.append(f"{where} 的 design_tradeoff.why_open 必须说明为何没有写死实现")
+    # Freedom to choose implementation is not evidence of a consequential tradeoff.
+    context_excerpt = _text(tradeoff.get("context_excerpt"))
+    if len(context_excerpt) < 12:
+        errors.append(f"{where} 的 design_tradeoff.context_excerpt 必须摘录触发取舍的真实业务条件")
+    elif prompt and context_excerpt not in prompt:
+        errors.append(f"{where} 的 design_tradeoff.context_excerpt 不在最终题面中")
+    context_anchors = tradeoff.get("context_anchors")
+    if not isinstance(context_anchors, list) or not context_anchors:
+        errors.append(f"{where} 的 design_tradeoff.context_anchors 必须提供真实取舍条件的源码依据")
+    else:
+        for index, anchor in enumerate(context_anchors):
+            label = f"{where} design_tradeoff.context_anchors[{index}]"
+            if not isinstance(anchor, dict):
+                errors.append(f"{label} 必须是源码锚点对象")
+                continue
+            if repo is None:
+                errors.append(f"{label} 缺少仓库，无法核对取舍条件")
+                continue
+            anchor_errors, _ = _source_region(repo, anchor, label)
+            errors.extend(anchor_errors)
+    analysis = tradeoff.get("option_analysis")
+    if not isinstance(analysis, list):
+        analysis = []
+    analyzed: set[str] = set()
+    for index, item in enumerate(analysis):
+        label = f"{where} design_tradeoff.option_analysis[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{label} 必须是对象")
+            continue
+        option = _text(item.get("option"))
+        if option not in options or option in analyzed:
+            errors.append(f"{label}.option 必须唯一对应 options 中的真实方案")
+        analyzed.add(option)
+        for key in ("benefit", "cost", "viable_when"):
+            if len(_text(item.get(key))) < 12:
+                errors.append(f"{label}.{key} 必须写清该方案的收益、代价和成立条件，不能只写可自行选择")
+    if set(options) - analyzed or len(analyzed) < 2:
+        errors.append(f"{where} 的 design_tradeoff.option_analysis 必须覆盖至少两个方案的实际代价")
+    if len(_text(tradeoff.get("decision_impact"))) < 12:
+        errors.append(f"{where} 的 design_tradeoff.decision_impact 必须说明选择如何影响数据语义或处理链路")
     if tradeoff.get("implementation_not_prescribed") is not True:
         errors.append(f"{where} 的 design_tradeoff.implementation_not_prescribed 必须为 true")
     tradeoff_excerpt = _text(tradeoff.get("prompt_excerpt"))
     if len(tradeoff_excerpt) < 8:
         errors.append(f"{where} 的 design_tradeoff.prompt_excerpt 缺失")
-    elif not OPEN_CHOICE_RE.search(tradeoff_excerpt):
+    elif not _has_tradeoff_evidence(tradeoff_excerpt, context_excerpt):
         errors.append(
             f"{where} 的 design_tradeoff.prompt_excerpt 必须留下真实选择权："
-            "明确让设计者决定哪份、哪一版、谁优先或采用哪种方案；"
-            "只写结果不变量、兼容要求或固定“以谁为准”不构成 H3"
+            "通过真实业务条件体现未预定的冲突轴，并与 context_excerpt 对应；"
+            "只写结果不变量、兼容要求或固定“以谁为准”不构成 H3，"
+            "也不要追加由你决定之类的委托句"
         )
 
     counterexample = design.get("medium_counterexample")
@@ -385,7 +446,7 @@ def _design_errors(
         if decision_excerpt:
             errors.extend(_tradeoff_conflict_errors(prompt, decision_excerpt))
         prescription_count = sum(prompt.count(marker) for marker in PRESCRIPTION_MARKERS)
-        if prescription_count >= 4 and not OPEN_CHOICE_RE.search(decision_excerpt):
+        if prescription_count >= 4 and not _has_tradeoff_evidence(decision_excerpt, context_excerpt):
             errors.append(
                 f"{where} 的题面步骤写得太死且没有留下实现取舍；"
                 "减少先/再/逐项等过程指令，改为写结果不变量和可选裁决轴"

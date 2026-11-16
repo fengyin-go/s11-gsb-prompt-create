@@ -19,6 +19,10 @@ from typing import Any
 
 FOLDER_PLAN_RE = re.compile(r"-(0[1-9]|[1-9][0-9])-(development|bugfix|optimization|refactor|migration)$")
 DOMAIN_GATE_VERSION = 2
+GENERIC_REPAIR_RE = re.compile(
+    r"(?:修复|修正|纠正|调整)[^。；\n]{0,45}(?:路由匹配|路由顺序|参数传递|参数映射|参数名|接口参数|路由截获)"
+    r"|(?:导出|下载)[^。；\n]{0,30}(?:被[^。；\n]{0,15}路由|当作整数|转换为整数|返回\s*422)"
+)
 ANCHOR_SUPPORTS = {"input", "operation", "output", "observable"}
 DOMAIN_PROFILES = {
     "数据工程": {
@@ -167,8 +171,6 @@ def _domain_chain_errors(topic_map: dict[str, Any], fit: dict[str, Any], where: 
     main_request = _text(fit.get("prompt_main_request"))
     if not main_request:
         errors.append(f"{where} 缺少 prompt_main_request")
-    elif not main_request.startswith("请"):
-        errors.append(f"{where} 的 prompt_main_request 必须是明确的“请...”主动作句")
     for key in ("input", "operation", "output"):
         if values[key] and values[key] not in main_request:
             errors.append(f"{where} 的 prompt_main_request 没有逐字包含 domain_chain.{key}")
@@ -192,6 +194,12 @@ def _domain_chain_errors(topic_map: dict[str, Any], fit: dict[str, Any], where: 
                 "替换领域对象后仍是同一任务，说明题面借壳"
             )
     domain = _text(topic_map.get("domain"))
+    if domain == "数据工程" and GENERIC_REPAIR_RE.search(main_request):
+        errors.append(
+            f"{where} 的主请求命中通用接口参数/路由修复风险；"
+            "导出入口可用不等于数据处理缺陷，须换成有真实错算、漏数、重复、转换或存储错误证据的题位，"
+            "不能追加数据计算需求把 Bugfix 改成功能开发"
+        )
     if domain in DOMAIN_PROFILES:
         artifacts = _profile_hits(domain, [values["input"], values["output"]], "artifact_terms")
         operations = _profile_hits(domain, [values["operation"]], "operation_terms")

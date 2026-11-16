@@ -96,12 +96,6 @@
         "model_process_focus": [
           "只允许写入模型自身代码、验证或判断造成的失败与修正"
         ],
-        "context_isolation": {
-          "workspace_only": true,
-          "cross_session_memory": false,
-          "answer_notes": false,
-          "prompt_statement": "只依据当前仓库、本轮题面和实际运行结果完成任务，不读取其他会话、答案笔记或历史对话缓存。"
-        },
         "style_focus": "Feedback 用完整主谓句写业务行为、实际落差和用户可观察结果",
         "language_terms": [
           {"source": "内部缩写", "public": "用户能理解的动作或字段"}
@@ -142,6 +136,6 @@ requirements.check 是供验收者阅读的核对方法，可为自然语言，�
 `review_contract` 是必填的反馈生产契约。`business_checks` 必须覆盖全部 requirements；每个 check
 要写清业务行为、证据类型和成功信号。`test_behaviors` 只登记真实测试与需求的映射，不能只写
 “15 个测试通过”。环境依赖安装、网关、端口、进程清理和工具缺失统一列入排除项，不能作为模型
-扣分依据。`context_isolation.prompt_statement` 必须逐字进入最终题面，禁止读取跨会话记忆或答案
-笔记。`prepare_handoff.py` 会运行该契约，并把契约原文保存到每个任务的
+扣分依据。不生成或要求 `context_isolation`，最终题面不得包含上下文、会话、记忆或答案来源限制。
+`prepare_handoff.py` 会运行该契约，并把契约原文保存到每个任务的
 `review-contract.json`，同时在 `task.json` 写入内容摘要。

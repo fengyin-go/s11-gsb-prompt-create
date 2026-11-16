@@ -21,6 +21,23 @@ description: "solo11 单轮 pointwise 批量出题：可从 GitHub/Git 仓库或
 | 代码重构 | refactor | 5% | 有真实结构目标，保持约定行为 |
 | 依赖升级与迁移 | migration | 5% | 明确依赖版本、兼容影响或平台迁移目标 |
 
+任务类型不是标签，也不是只改开头动词。`domain_fit.main_task` 与
+`prompt_main_request` 必须写出该类任务的真实业务意图，最终题面还必须以
+`prompt_main_request` 原样开头：
+
+- 功能开发：说明当前能力尚未形成、缺少或没有，并新增可观察的数据能力、模块或产物。
+  不能把读取现有数据、计算已有结果改写成“功能开发”。
+- Bugfix：开头必须出现可复现的缺陷、错误现象或失败后果，修复目标是恢复既有行为；
+  不能把正常的数据加工需求加一个“修复”前缀。
+- 功能优化：必须针对现有、已有或当前链路，写清性能、稳定性、去重、失败恢复等改进目标；
+  不能是首次新增能力。
+- 代码重构：必须写明既有行为、输入输出或口径保持不变。
+- 依赖升级与迁移：必须有真实版本、依赖、兼容、存量、回滚或迁移目标。
+
+题位 `family` 也必须与类型一致。`check_prompt_type_intent.py` 是独立硬闸：
+题位阶段查 `main_task`、`prompt_main_request`、`family`、slug 和类型；写表及交接阶段
+再查工作簿最终题面。该闸与领域、难度、主题和查重闸并列，不能用备注放行。
+
 用户说“批量生成提示词”时，默认按真实仓库的最高有效容量建仓并出题。`30/30/30/5/5` 仅作建议；真实 Bugfix、重构或迁移目标不足时，使用其他有证据支持的类型填满有效题位，不因类型比例减少题数、停止或要求确认。不得编造缺陷、放宽难度、去重、topic 家族或模式上限来凑容量。不出代码理解，不把普通工程化泛题标作依赖升级。
 
 `scripts/s11_policy.py` 统一校验五类名称；topic map 的 `type_policy` 默认 `capacity-first`，只有用户明确要求固定比例时才设 `strict-ratio`。`allocate_counts` 保留最大余数法作为建议；计划、建仓和交接遵守同一策略。最高容量以真实源码、语义题位及所有质量闸门为依据；理论座位无法形成合格题时，记录具体原因并报告最终有效容量。
@@ -96,6 +113,7 @@ python3 <skill>/scripts/create_source_snapshot.py \
 
 ```bash
 python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map.json --repo <源仓库> --expected-base-commit <SHA> --require-domain-fit --require-difficulty-design
+python3 <skill>/scripts/check_prompt_type_intent.py --parent <batch目录> --json
 python3 <skill>/scripts/domain_fit.py --parent <batch目录> --repo <源仓库>
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123 --dry-run
 # 核对演练清单后，去掉 --dry-run 创建并发布初始仓库
@@ -113,27 +131,54 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 
 先按 [references/domain-fit.md](references/domain-fit.md) 逐题复核最终题面的主任务、真实数据链路及可观察领域结果，再读 [references/difficulty-hardening.md](references/difficulty-hardening.md) 和 [references/generation-rules.md](references/generation-rules.md)，继承原 GSB 的真实代码准入、G16/G19 难度、负向案例、主题去重和跨项目防撞。类型已换为 S11 五类；功能优化按已有能力题审视，依赖升级与迁移必须有真实版本/兼容目标。平台 G16 的基础项数仍是 `Bugfix` 三项、其余至少两项且至少一项硬证据；S11 额外要求每个题位都具备 H1/H2/H3，因为本批平台最终 P5 对全部通过样本都查实了这三项。每题至少牵动两个真实功能模块；普通列表/概览一致不算第二模块。
 
-交接前还要按 [references/review-readiness.md](references/review-readiness.md) 填写 `review_contract`：需求到业务行为的证据映射、真实测试行为、关键约束句、环境噪声排除项和上下文隔离声明。平台已实测的环境故障、电报式过程描述、泛化测试总数和跨会话记忆，不能留给运行侧事后猜。
+交接前还要按 [references/review-readiness.md](references/review-readiness.md) 填写 `review_contract`：需求到业务行为的证据映射、真实测试行为、关键约束句和环境噪声排除项。平台已实测的环境故障、电报式过程描述和泛化测试总数，不能留给运行侧事后猜。不生成上下文隔离声明，也不要求 `context_isolation` 元数据；题面不得限定上下文、会话、记忆或答案来源。
 
-写题面前先填写 `difficulty_design`，不能用最终题面倒填。H1 至少写两条不同类别且相互作用的硬约束，两条都要能从主任务读到失败后果；H2 的第二模块必须消费、写入、持久化或编排真实数据产物，不能只是列表/详情/概览展示；H3 必须写清同一冲突轴上的两个可行裁决、结果不变量和选择影响，题面要直接留下“哪份/哪一版/谁优先/采用哪种方案由设计者决定”的选择权。仅写“兼容历史”“固定以某版本为准”“失败后重试”或只写一句结果不变量都不算 H3。同一业务对象不能在另一句先被固定裁决、随后又要求设计者选择，否则平台会认为实现已经写死。
+写题面前先填写 `difficulty_design`，不能用最终题面倒填。H1 至少写两条不同类别且相互作用的硬约束，两条都要能从主任务读到失败后果；H2 的第二模块必须消费、写入、持久化或编排真实数据产物，不能只是列表/详情/概览展示；H3 的两个可行方案、代价和选择影响只写在内部设计中，题面用具体冲突条件、处理边界和可观察结果自然承载取舍，不写“由你权衡优先项”“由设计者决定”“请自行选择”等委托句，也不列参考实现选项。仅写“兼容历史”“固定以某版本为准”“失败后重试”或只写一句结果不变量都不算 H3。同一冲突轴不能被题面预先固定为唯一实现。
 
-三段 `prompt_excerpt` 必须逐字出现在最终题面，源码锚点必须跨两个模块并可回查。`check_prompt_g16.py` 是平台词面下限和已知正样本校准；`difficulty_contract.py` v2 是更严格的结构化 H3 检查，两者都必须通过。`check_prompt_g16.py` 对“两版结论冲突时由你决定采用哪份”一类已实测通过的开放句做了正向校准，但不会仅凭该句替代 H1/H2 或结构化取舍设计。
+三段 `prompt_excerpt` 必须逐字出现在最终题面，源码锚点必须跨两个模块并可回查。`check_prompt_g16.py` 是平台词面下限和已知正样本校准；`difficulty_contract.py` v2 是更严格的结构化 H3 检查，两者都必须通过。旧校准语料中的显式委托句仅保留历史识别用途，不是新题模板；新题由业务矛盾及结构化方案代价证明 H3，表达闸拒绝显式委托句。
 
-题面只描述用户问题、目标行为、业务边界和可观察的验收结果。直接写想要实现的需求，不写“本需求需要……”“本次任务要……”“这次我需要……”“请你帮我……”之类的需求叙述外壳或第一人称铺垫；用“请……”直接写目标行为、边界和结果。正常业务时间语义不受影响，例如“本次结算周期”可以保留。领域主动作必须先写清楚“读取/采集什么数据，执行什么处理，生成什么数据结果，如何观察结果”，并且逐字使用题位的 `prompt_main_request`；权限、路由、灰度、缓存、发布和 UI 只能跟在数据链路之后作为支撑。不得为方便验收或录屏，额外指定新建的验证脚本、文件路径、命令参数、测试框架或内部实现结构。真实已有的接口/字段、兼容契约及用户明确指定的交付形式可保留；验证方式与交接编排按引用规则单独维护。
+### 生成前置，不靠检查补题
+
+每条在起草前完成一张内部设计卡：源码已具备/缺少什么、真实题型、不带产品名的主工作摘要、领域输入到产物的链路、两项相互作用的失败约束、第二模块如何消费产物、冲突场景与两个可行方案的收益/代价。先用源码确认现有事实；新增能力所需输入可作为明确的新需求，但不能伪称已有迟到数据、规模、版本或失败现象。设计卡任一项站不住就换题，不能先写简单题再补刷新、并发或开放尾句。
+
+起草时同时满足表达、题型、领域、H1/H2/H3：首段包含主工作与真实矛盾，中段写处理边界和跨模块后果，实例及验收只验证这些要求。内部方案不复制到题面，不向模型发出“做设计取舍”的指令。完成一条就做语义核对并跑样稿准入，再起草下一条；全量检查是防回归，不是首次发现生成规则的环节。写作参考及有平台回执的自然 H3 例子见 [difficulty-hardening.md](references/difficulty-hardening.md)。
+
+题面只描述用户问题、目标行为、业务边界和可观察的验收结果。不要求以“请”开头，也不统一开场模板；按题型自然起句，具体要求见 [generation-rules.md](references/generation-rules.md) 的“题面表达”和“任务类型语义”。题面不得出现任何模型上下文或信息来源限定，生成、写表和交接均不得追加此类文字。业务数据范围、权限及计算口径不受影响。
+
+先写自然的业务主请求，再将其中的真实输入、处理、输出和观察结果提取到 `domain_chain`，不要反过来拼接字段制造题面。`prompt_main_request` 保留自然的开头段，可包含故障现象和修复目标两句，并作为题面的原样前缀；不能强迫 Bugfix 写成新增计算能力，也不能强迫所有题目生成一个新数据集。领域主任务仍须明确，权限、路由、灰度、缓存、发布和 UI 不得喧宾夺主。不得为方便验收或录屏，额外指定新建的验证脚本、文件路径、命令参数、测试框架或内部实现结构。真实已有的接口/字段、兼容契约及用户明确指定的交付形式可保留。
+
+逐题核对每句话的业务对象和源码依据。跨模块要求必须写出具体模块、消费的数据和预期行为，设计取舍必须来自真实冲突；不得拼接“另一个入口”、不明状态或虚构的双版本来凑 H1/H2/H3。困难契约仍须先设计，不能事后倒填；题位无法自然满足时更换题位，不增补空泛尾句。用户要求先看样稿时，只产出指定数量的独立预览，未经确认不得改正式工作簿、批量生成器或交接文件。
+
+### 样稿也须先准入
+
+样稿不是降低领域或难度标准的通道。2026-11-16 本项目的两条预览暴露了流程漏检：简单达成率除法配“全量或增量自行选择”没有充分 H3，筛选参数与导出路由修复则可能只是通用接口 Bugfix。此前两条不作为合格范例，不能照抄；表达/类型检查通过不等于领域或 H1/H2/H3 通过。
+
+每条先写一句不含产品名的主工作摘要，审计实际改变的数据语义；如果主要只是按钮、参数转发、路由匹配、权限配额或业务状态控制，即使带“导出、指标、刷新”也不算领域准入。简单业务计算字段不能只靠附加刷新与并发控制升级成困难数据工程题。证据不足即换题，Bugfix 不能通过附加新计算能力挽救领域。
+
+H3 必须有真实触发条件、两个成立方案、各自收益/代价/适用条件、对数据语义或链路的影响和共同不变量；“由你选择”“全量或增量均可”只是实现自由，不是充分证据。填写 `design_tradeoff.context_excerpt`、`context_anchors`、`option_analysis` 和 `decision_impact`，细则见 [difficulty-hardening.md](references/difficulty-hardening.md)。取舍条件及真实矛盾须自然体现在题面中，但不把内部审计字段或参考方案强行复制进题面。
+
+对指定数量的样稿在独立 JSON 中保存 `records`（与工作簿行同名的字段）及 `topic_map`（只含这些题位及相关 topics，含完整领域和困难契约），运行：
+
+```bash
+python3 <skill>/scripts/check_prompt_preview.py --candidate <独立样稿.json> --repo <基准源码目录>
+```
+
+表达、题型、领域、H1/H2/H3 四项均通过，且逐题人工复核没有上述借壳/假取舍后，才能作为候选提示词发用户确认。未通过只报告淘汰原因，不能贴出不合格题冒充可交付样稿。该命令不写正式表，也不等于整批查重或交接通过；确认后仍须执行全部正式闸门。用户认可表达不能豁免领域或难度要求。
 
 使用本 skill 自带的辅助脚本；它们是原 helper 的隔离副本，避免共享脚本把功能开发和功能优化折叠成同一旧类型。G16 核心判据仍读取同级 `cc-gsb-create/scripts/gsb_difficulty.py`，不可自行抄判据。
 
 1. 确认当前 SHA 的启动预检、依赖复制与无安装 smoke 已通过。
 2. 同步平台历史语料，检查全局注册表，扫本批及历史近邻。默认共享原 GSB 全局注册表，保留跨批次防撞；允许用 `GSB_CROSS_PROJECT_REGISTRY` 显式指定。没有历史时只能按引用规则记录一次 bootstrap。
 3. 先生成台账与题位表。逐题读取自己的 origin 源码，避开依赖目录。缺陷必须真实复现，不猜现象或结果。台账中记录领域准入结论、主要工作、`domain_chain`、`prompt_main_request`、反事实通用任务、受影响的数据对象/链路、带行号源码锚点和领域验收结果；领域不符或证据不足的候选先换切入点，不进入写表。
-4. 写表只调用本地 `batch_prompt_workbook.py update`；它在写入前执行题面直接表达检查、领域 v2 契约、结构化困难契约、G16/G19 和原三道闸、跨项目闸。题面出现需求/任务自指、第一人称请求或“请你帮我”类外壳时直接拒写。领域闸要求主动作句位于题面前半段、逐字覆盖领域输入/处理/输出/观察结果，源码锚点连续原文可回查；只在标题或末尾补业务名词、替换对象后仍是通用服务任务均不放行。禁止 `--allow-gate-failure`。`tasks.xlsx` 固定原八列，题型严格使用上表名称。
-5. 完成后全量复检领域准入、困难契约与题面副本；交接前再次核对最终题面和 requirements 的主体一致。G16/G19、主题及查重通过不能替代领域准入或 difficulty_design。strict 或困难契约命中时逐项重写；`难度复核` 备注不能放行，已确认负向硬闸不能备注放行。若词面 G16 已通过但没有真实 H3 选择权，仍以 difficulty_contract v2 的结果为准。
+4. 写表只调用本地 `batch_prompt_workbook.py update`；它在写入前执行题面直接表达检查、任务类型语义、领域 v2 契约、结构化困难契约、G16/G19 和原三道闸、跨项目闸。题面出现需求/任务自指、第一人称请求、“请你帮我”类外壳或上下文来源限制时直接拒写；不以“请”开头不是拒写理由。领域闸要求主动作句位于题面前半段、逐字覆盖领域输入/处理/输出/观察结果，源码锚点连续原文可回查；只在标题或末尾补业务名词、替换对象后仍是通用服务任务均不放行。类型语义闸要求最终题面以对应类型的真实主动作原样开头，并核对题位 family、main_task 与工作簿题型。禁止 `--allow-gate-failure`。`tasks.xlsx` 固定原八列，题型严格使用上表名称。
+5. 完成后全量复检领域准入、困难契约与题面副本；交接前再次核对最终题面和 requirements 的主体一致。写入后重新读取正式工作簿的提示词单元格，并检查候选题面、`prompt.txt`、`task.json` 中的题面文本一致且都通过 `prompt_style`，不能只验生成器内存中的字符串。中间版工作簿和历史日志不得当作当前交付物。G16/G19、主题及查重通过不能替代领域准入或 difficulty_design。strict 或困难契约命中时逐项重写；`难度复核` 备注不能放行，已确认负向硬闸不能备注放行。若词面 G16 已通过但没有真实 H3 选择权，仍以 difficulty_contract v2 的结果为准。
 
 ```bash
 python3 <skill>/scripts/sync_platform_prompt_corpus.py
 python3 <skill>/scripts/check_repo_theme.py --parent <batch目录> --repo <任务目录>/origin --topic-map <batch目录>/repo-topic-map.json --require-topic-map --write-ledger --write-feature-points --max-per-mode 3
 python3 <skill>/scripts/batch_prompt_workbook.py scan --parent <batch目录>
 python3 <skill>/scripts/batch_prompt_workbook.py update --parent <batch目录> --repo <任务目录>/origin --topic-map <batch目录>/repo-topic-map.json --require-topic-map --folder cc10003-01-bugfix --prompt '<最终题面>' --max-per-mode 3
+python3 <skill>/scripts/check_prompt_type_intent.py --parent <batch目录> --json
 python3 <skill>/scripts/check_prompt_g16.py --parent <batch目录>
 python3 <skill>/scripts/check_prompt_g16.py --parent <batch目录> --strict
 python3 <skill>/scripts/check_difficulty_contract.py --parent <batch目录> --json
@@ -145,7 +190,7 @@ python3 <skill>/scripts/check_cross_project_prompts.py --batch-dir <batch目录>
 
 ## 4. 交接给运行侧
 
-复核每题的领域准入证据后，读 [references/handoff-schema.md](references/handoff-schema.md)，准备真实的领域/语言元数据、逐项 requirements、`review_contract` 和可执行录屏方案。`review_contract` 必须把每个需求映射到具体业务行为、证据类型和成功信号；测试只写真实行为映射，不写泛化总数；环境、网关、端口、进程清理和工具缺失统一列为不扣分噪声。最终题面还要写统一上下文隔离声明，禁止读取跨会话记忆或答案笔记。`_config/settings.json` 中镜像摘要必须来自本机真实预检，不猜另一架构的值。原 `cc-domain-task-create` 不是本批必经入口。同一基础仓库、基线和镜像的所属领域、子方向、语言/框架、Harness、Harness 版本、操作系统及环境可复现等级仅在 metadata.common 核实一次，交接生成公共档案供其余题和后续同身份批次复用，不逐题重新生成。`metadata.common` 的领域和子方向必须与 topic map 一致；交接会把该题位的 `domain_contract` 冻结进 `task.json`，运行侧按 hash 校验；`review_contract` 原文写入 `review-contract.json`，摘要写入 `task.json`。公共领域字段不能免除逐题语义核验；不相符时更换题位，不靠改领域字段、挪账号或追加业务名词放行。
+复核每题的领域准入证据后，读 [references/handoff-schema.md](references/handoff-schema.md)，准备真实的领域/语言元数据、逐项 requirements、`review_contract` 和可执行录屏方案。`review_contract` 必须把每个需求映射到具体业务行为、证据类型和成功信号；测试只写真实行为映射，不写泛化总数；环境、网关、端口、进程清理和工具缺失统一列为不扣分噪声。交接不得向最终题面追加上下文隔离声明或其他信息来源限制。`_config/settings.json` 中镜像摘要必须来自本机真实预检，不猜另一架构的值。原 `cc-domain-task-create` 不是本批必经入口。同一基础仓库、基线和镜像的所属领域、子方向、语言/框架、Harness、Harness 版本、操作系统及环境可复现等级仅在 metadata.common 核实一次，交接生成公共档案供其余题和后续同身份批次复用，不逐题重新生成。`metadata.common` 的领域和子方向必须与 topic map 一致；交接会把该题位的 `domain_contract` 冻结进 `task.json`，运行侧按 hash 校验；`review_contract` 原文写入 `review-contract.json`，摘要写入 `task.json`。公共领域字段不能免除逐题语义核验；不相符时更换题位，不靠改领域字段、挪账号或追加业务名词放行。
 
 ```bash
 python3 <skill>/scripts/check_review_contract.py --parent <batch目录> --metadata <batch目录>/handoff-metadata.json --json

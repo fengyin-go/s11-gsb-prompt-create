@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import batch_prompt_workbook as workbook
+import check_prompt_type_intent
 import domain_fit
 import difficulty_contract
 import prompt_style
@@ -38,6 +39,9 @@ def validate_generation(parent, rows, origin, metadata=None):
         raise ValueError("题面表达闸门未通过：" + "；".join(style_errors))
     topic_map = load_topic_map(parent=parent, repo=origin, required=True,
                                expected_base_commit=git(origin, "rev-parse", "HEAD"))
+    type_intent_errors = check_prompt_type_intent.prompt_errors(rows, topic_map)
+    if type_intent_errors:
+        raise ValueError("任务类型语义闸门未通过：" + "；".join(type_intent_errors))
     domain_errors = domain_fit.map_errors(topic_map, origin)
     domain_errors += domain_fit.prompt_errors(rows, topic_map)
     if domain_errors:

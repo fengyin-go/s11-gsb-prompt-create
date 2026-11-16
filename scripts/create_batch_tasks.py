@@ -12,6 +12,7 @@ from pathlib import Path
 import batch_prompt_workbook as workbook
 import domain_fit
 import difficulty_contract
+import check_prompt_type_intent
 import github_helpers as hub
 import create_source_snapshot as source_snapshot
 from check_repo_theme import compute_capacity, derive_repo_modules, derivation_health
@@ -162,6 +163,9 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
     domain_errors = domain_fit.map_errors(topic_map, source)
     if domain_errors:
         raise ValueError("领域题位契约未通过：" + "；".join(domain_errors))
+    type_intent_errors = check_prompt_type_intent.hint_errors(topic_map)
+    if type_intent_errors:
+        raise ValueError("任务类型语义未通过：" + "；".join(type_intent_errors))
     difficulty_errors = difficulty_contract.map_errors(topic_map, source)
     if difficulty_errors:
         raise ValueError("困难设计契约未通过：" + "；".join(difficulty_errors))

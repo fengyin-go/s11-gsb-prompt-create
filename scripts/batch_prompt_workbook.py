@@ -483,6 +483,7 @@ def run_write_gates(
     from check_prompt_dedup import check as dedup_check
     from check_prompt_difficulty import JUSTIFICATION_PREFIX
     from check_prompt_difficulty import check as difficulty_check
+    import check_prompt_type_intent
     import domain_fit
     import difficulty_contract
     import prompt_style
@@ -533,6 +534,9 @@ def run_write_gates(
     domain_errors = domain_fit.map_errors(topic_map, repo) if topic_map else []
     if topic_map:
         domain_errors += domain_fit.prompt_errors(records, topic_map)
+    type_intent_errors = (
+        check_prompt_type_intent.prompt_errors(records, topic_map) if topic_map else []
+    )
     style_errors = prompt_style.prompt_errors(records)
     difficulty_contract_errors = (
         difficulty_contract.prompt_errors(records, topic_map, repo) if topic_map else []
@@ -585,6 +589,7 @@ def run_write_gates(
     problems: list[str] = []
     problems += [f"题面表达未通过：{error}" for error in style_errors]
     problems += [f"领域相关性未通过：{error}" for error in domain_errors]
+    problems += [f"任务类型语义未通过：{error}" for error in type_intent_errors]
     problems += [f"困难设计契约未通过：{error}" for error in difficulty_contract_errors]
     pending_rows = sum(1 for record in records if not str(record.get("提示词") or "").strip())
     deferred_batch_ratios = {
@@ -648,6 +653,11 @@ def run_write_gates(
             "version": prompt_style.STYLE_GATE_VERSION,
             "problems": style_errors,
         },
+        "type_intent": {
+            "ok": not type_intent_errors,
+            "version": check_prompt_type_intent.TYPE_GATE_VERSION,
+            "problems": type_intent_errors,
+        },
         "difficulty_contract": {
             "ok": not difficulty_contract_errors,
             "version": difficulty_contract.CONTRACT_VERSION,
@@ -708,6 +718,7 @@ def write_generation_manifest(
         "violations": gate.get("problems") or [],
         "domain": gate.get("domain") or {},
         "prompt_style": gate.get("prompt_style") or {},
+        "type_intent": gate.get("type_intent") or {},
         "difficulty_contract": gate.get("difficulty_contract") or {},
         "cross_project": gate.get("cross_project") or {},
         "skill": skill,
@@ -997,6 +1008,7 @@ def update(
             "problems": gate.get("problems"),
             "domain": gate.get("domain"),
             "prompt_style": gate.get("prompt_style"),
+            "type_intent": gate.get("type_intent"),
             "module_counts": (gate.get("theme") or {}).get("module_counts"),
             "topic_policy": (gate.get("theme") or {}).get("topic_policy"),
             "topic_counts": (gate.get("theme") or {}).get("topic_counts"),

@@ -83,6 +83,31 @@ class DomainFit(unittest.TestCase):
         self.assertEqual(domain_fit.map_errors(self.map, self.repo), [])
         self.assertEqual(domain_fit.prompt_errors(self.records, self.map), [])
 
+    def test_domain_main_request_need_not_start_with_please(self):
+        fit = self.map["task_plan"][0]["domain_fit"]
+        fit["prompt_main_request"] = fit["prompt_main_request"].removeprefix("请")
+        self.records[0]["提示词"] = self.records[0]["提示词"].removeprefix("请")
+        self.assertEqual(domain_fit.map_errors(self.map, self.repo), [])
+        self.assertEqual(domain_fit.prompt_errors(self.records, self.map), [])
+
+    def test_generic_route_and_parameter_repairs_are_not_data_engineering(self):
+        fit = self.map["task_plan"][0]["domain_fit"]
+        for request in (
+            "修复指标筛选参数映射并恢复明细导出。",
+            "指标导出被明细路由截获，修复接口返回错误。",
+            "修复接口参数传递并读取指标数据生成导出文件。",
+        ):
+            with self.subTest(request=request):
+                fit["prompt_main_request"] = request
+                errors = domain_fit.map_errors(self.map, self.repo)
+                self.assertTrue(any("通用接口参数/路由修复风险" in error for error in errors))
+
+    def test_real_data_conversion_defect_is_not_rejected_as_route_repair(self):
+        fit = self.map["task_plan"][0]["domain_fit"]
+        fit["prompt_main_request"] = "解析订单数据时金额小数被截断，修复转换并生成订单明细文件。"
+        errors = domain_fit.map_errors(self.map, self.repo)
+        self.assertFalse(any("通用接口参数/路由修复风险" in error for error in errors))
+
     def test_prompt_must_keep_domain_object_and_result(self):
         self.records[0]["提示词"] = "升级构建工具和路由配置。"
         errors = domain_fit.prompt_errors(self.records, self.map)

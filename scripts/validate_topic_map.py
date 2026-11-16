@@ -17,6 +17,7 @@ from repo_topic_policy import TopicMapError, load_topic_map, topic_slots
 from s11_policy import validate_plan
 import domain_fit
 import difficulty_contract
+import check_prompt_type_intent
 
 
 def main() -> None:
@@ -42,6 +43,9 @@ def main() -> None:
             expected_base_commit=args.expected_base_commit.strip(),
         )
         validate_plan(topic_map)
+        type_intent_errors = check_prompt_type_intent.hint_errors(topic_map)
+        if type_intent_errors:
+            raise TopicMapError("；".join(type_intent_errors))
         if args.require_domain_fit:
             errors = domain_fit.map_errors(
                 topic_map,

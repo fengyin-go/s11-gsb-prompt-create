@@ -8,7 +8,8 @@ The 2026-11-15 batch showed six avoidable PENDING_FIX outcomes:
 - two traces read cross-session answer notes.
 
 This contract makes the expected business behavior, test meaning, excluded
-environment noise, language focus, and workspace isolation explicit before run.
+environment noise, and language focus explicit before run. Context-source
+restrictions are not part of the business prompt or required review metadata.
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import prompt_style
+
 VERSION = 1
 EVIDENCE_KINDS = {"http", "test", "ui", "artifact", "probe", "log"}
 REQUIRED_ENVIRONMENT_EXCLUSIONS = {
@@ -32,12 +35,6 @@ REQUIRED_ENVIRONMENT_EXCLUSIONS = {
     "process_cleanup",
     "tool_availability",
 }
-CONTEXT_STATEMENT = (
-    "只依据当前仓库、本轮题面和实际运行结果完成任务，"
-    "不读取其他会话、答案笔记或历史对话缓存。"
-)
-
-
 def _text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -119,21 +116,7 @@ def _contract_errors(record: dict[str, Any], prompt: str) -> list[str]:
         if any(term in _text(item).lower() for term in ("gateway", "dependency", "pkill", "exit code")):
             errors.append(f"{folder} 的 model_process_focus 不能放环境或工具噪声：{item}")
 
-    isolation = contract.get("context_isolation")
-    if not isinstance(isolation, dict):
-        errors.append(f"{folder} 缺少 context_isolation")
-    else:
-        if isolation.get("workspace_only") is not True:
-            errors.append(f"{folder} 的 context_isolation.workspace_only 必须为 true")
-        if isolation.get("cross_session_memory") is not False:
-            errors.append(f"{folder} 的 context_isolation.cross_session_memory 必须为 false")
-        if isolation.get("answer_notes") is not False:
-            errors.append(f"{folder} 的 context_isolation.answer_notes 必须为 false")
-        statement = _text(isolation.get("prompt_statement"))
-        if statement != CONTEXT_STATEMENT:
-            errors.append(f"{folder} 的 context_isolation.prompt_statement 必须使用统一隔离声明")
-        elif statement not in prompt:
-            errors.append(f"{folder} 的上下文隔离声明不在最终题面中")
+    errors.extend(prompt_style.prompt_errors([{"子文件夹名称": folder, "提示词": prompt}]))
 
     style_focus = _text(contract.get("style_focus"))
     if len(style_focus) < 12:

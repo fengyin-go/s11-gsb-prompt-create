@@ -95,6 +95,18 @@ class SingleFlow(unittest.TestCase):
                                              "options": ["采集时间", "业务时间"],
                                              "outcome_invariant": "下游只能看到完整订单数据集",
                                              "why_open": "题面只固定可观察结果，不选择内部时间键。",
+                                             "context_excerpt": "恢复边界由你根据现有数据语义决定。",
+                                             "context_anchors": [{"path": "src/orders.py", "start_line": 2,
+                                                                  "end_line": 2, "excerpt": "解析订单数据并生成订单数据集"}],
+                                             "option_analysis": [
+                                                 {"option": "采集时间", "benefit": "可以按接入顺序恢复减少历史扫描范围",
+                                                  "cost": "需要补偿迟到订单避免遗漏历史业务数据",
+                                                  "viable_when": "接入时间可靠且可以单独补偿迟到数据"},
+                                                 {"option": "业务时间", "benefit": "可以按业务窗口恢复并核对历史完整性",
+                                                  "cost": "历史修订需要重新扫描并去重窗口数据",
+                                                  "viable_when": "业务时间可靠且可承担历史窗口扫描成本"},
+                                             ],
+                                             "decision_impact": "时间轴选择影响恢复扫描范围和迟到记录处理",
                                              "implementation_not_prescribed": True,
                                             "prompt_excerpt": "恢复边界由你根据现有数据语义决定。",
                                          },
@@ -123,7 +135,10 @@ class SingleFlow(unittest.TestCase):
                                      },
                                      "domain_fit": {
                                          "version": 2,
-                                         "main_task": "解析订单数据并生成订单数据集",
+                                         "main_task": (
+                                             "新增订单数据处理能力；当前尚未形成订单数据集，"
+                                             "解析订单数据并生成订单数据集"
+                                         ),
                                          "business_result": "导出订单数据集",
                                          "domain_chain": {
                                              "input": "订单数据",
@@ -131,7 +146,10 @@ class SingleFlow(unittest.TestCase):
                                              "output": "订单数据集",
                                              "observable": "导出订单数据集",
                                          },
-                                         "prompt_main_request": "请解析订单数据并导出订单数据集。",
+                                         "prompt_main_request": (
+                                             "请新增订单数据处理能力：当前尚未形成订单数据集，"
+                                             "解析订单数据并导出订单数据集。"
+                                         ),
                                          "genericization": {
                                              "rewritten_with_generic_objects": "升级构建工具并调整路由配置",
                                              "same_task_without_domain_semantics": False,
@@ -203,7 +221,15 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(result["tasks"][0]["task_id"], "cc10003-01-development")
 
     def test_bugfix_directory_matches_repository_and_start_index_only_affects_workbook(self):
-        self.topic["task_plan"][0].update(task_type="Bugfix", slug="bugfix")
+        self.topic["task_plan"][0].update(
+            task_type="Bugfix",
+            slug="bugfix",
+            family="Bugfix",
+        )
+        self.topic["task_plan"][0]["domain_fit"].update(
+            main_task="修复订单解析错误导致订单数据集缺失；解析订单数据并生成订单数据集",
+            prompt_main_request="请修复订单解析错误导致订单数据集缺失；解析订单数据并导出订单数据集。",
+        )
         create.save_json(self.parent / "repo-topic-map.json", self.topic)
         self.wire_git()
         result = create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
@@ -342,7 +368,21 @@ class SingleFlow(unittest.TestCase):
                 create.hub.resolve_repository_owner()
 
     def test_real_clones_handoff_and_main_advance(self):
-        self.topic["task_plan"][0].update(task_type="功能优化", slug="optimization")
+        self.topic["task_plan"][0].update(
+            task_type="功能优化",
+            slug="optimization",
+            family="优化既有能力",
+        )
+        self.topic["task_plan"][0]["domain_fit"].update(
+            main_task=(
+                "优化现有订单解析链路；重复全量扫描导致结果不稳定，"
+                "解析订单数据并稳定生成订单数据集"
+            ),
+            prompt_main_request=(
+                "请优化现有订单解析链路：重复全量扫描导致结果不稳定；"
+                "解析订单数据并稳定导出订单数据集。"
+            ),
+        )
         create.save_json(self.parent / "repo-topic-map.json", self.topic)
         self.wire_git()
         result = self.build()
@@ -359,7 +399,7 @@ class SingleFlow(unittest.TestCase):
                     "tasks": {task.name: {"requirements": [{"id": "R1", "text": "订单导出", "check": "make test"}],
                        "review_contract": {"version": 1, "business_checks": [], "test_behaviors": [],
                                            "key_business_constraint": "", "environment_exclusions": [],
-                                           "model_process_focus": [], "context_isolation": {},
+                                           "model_process_focus": [],
                                            "style_focus": "", "language_terms": []},
                        "recording_plan": {"setup_cmd": "make setup", "demo": [{"cmd": "make test", "show": "ok"}]},
                        "dependency_smoke": {"ok": True, "commit": self.commit, "command": "make test",

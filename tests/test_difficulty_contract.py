@@ -87,6 +87,18 @@ class DifficultyContractTest(unittest.TestCase):
                 "options": ["按采集时间恢复", "按业务时间恢复"],
                 "outcome_invariant": "恢复完成后下游只能看到完整订单数据集",
                 "why_open": "两种边界都可行，题面只固定可观察结果，不选择内部键。",
+                "context_excerpt": "导出中断后保留上一份完整订单数据集，重试只补写缺失记录",
+                "context_anchors": [{"path": "src/orders.py", "start_line": 2, "end_line": 2,
+                                     "excerpt": "解析订单数据并生成已发布订单数据集"}],
+                "option_analysis": [
+                    {"option": "按采集时间恢复", "benefit": "顺序读取采集批次可以减少历史扫描范围",
+                     "cost": "迟到订单需另行补算否则会遗漏业务窗口",
+                     "viable_when": "采集顺序稳定且存在迟到记录补偿路径"},
+                    {"option": "按业务时间恢复", "benefit": "直接覆盖受影响的业务窗口便于核对结果",
+                     "cost": "历史更正会扩大重新扫描与去重处理范围",
+                     "viable_when": "业务时间可靠且可以承担历史窗口重算成本"},
+                ],
+                "decision_impact": "恢复时间轴改变迟到订单的补算范围和扫描成本",
                 "implementation_not_prescribed": True,
                 "prompt_excerpt": (
                     "恢复边界请根据现有数据语义自行设计，但下游不得看到半成品。"
@@ -230,6 +242,57 @@ class DifficultyContractTest(unittest.TestCase):
         )
         errors = self.errors(topic, record)
         self.assertTrue(any("必须留下真实选择权" in error for error in errors))
+
+    def test_natural_business_tension_does_not_require_delegation(self):
+        topic = copy.deepcopy(self.topic)
+        tradeoff = topic["task_plan"][0]["difficulty_design"]["design_tradeoff"]
+        excerpt = "迟到订单与历史更正落在已发布窗口，补算期间导出仍读取完整订单数据集"
+        tradeoff["prompt_excerpt"] = excerpt
+        tradeoff["context_excerpt"] = excerpt
+        record = copy.deepcopy(self.record)
+        record["提示词"] = record["提示词"].replace(
+            "恢复边界请根据现有数据语义自行设计，但下游不得看到半成品。", excerpt + "。"
+        )
+        self.assertEqual(self.errors(topic, record), [])
+
+    def test_unrelated_tension_cannot_prove_the_context_axis(self):
+        self.assertFalse(difficulty_contract._has_tradeoff_evidence(
+            "同一商品采用两种不同价格，库存分配发生冲突", "订单恢复中断后保留完整数据集"
+        ))
+
+    def test_fixed_resolution_is_not_natural_open_evidence(self):
+        excerpt = "历史订单检查点发生冲突时，以最新检查点为准"
+        self.assertFalse(difficulty_contract._has_tradeoff_evidence(excerpt, excerpt))
+
+    def test_period_coverage_is_a_business_tension(self):
+        excerpt = "基准周期与对比周期可能天数不同，同一维度也可能只在其中一期出现"
+        self.assertTrue(difficulty_contract._has_tradeoff_evidence(excerpt, excerpt))
+
+    def test_free_implementation_choice_without_costs_is_not_h3(self):
+        topic = copy.deepcopy(self.topic)
+        tradeoff = topic["task_plan"][0]["difficulty_design"]["design_tradeoff"]
+        tradeoff.update({
+            "decision": "全量重算还是按变更更新由设计者选择",
+            "options": ["全量重算", "按变更更新"],
+            "prompt_excerpt": "全量重算还是按变更更新由你选择，但结果必须正确",
+        })
+        for key in ("option_analysis", "context_excerpt", "context_anchors", "decision_impact"):
+            tradeoff.pop(key)
+        record = copy.deepcopy(self.record)
+        record["提示词"] += tradeoff["prompt_excerpt"]
+        errors = self.errors(topic, record)
+        self.assertTrue(any("实际代价" in error for error in errors))
+        self.assertTrue(any("真实业务条件" in error for error in errors))
+        self.assertTrue(any("源码依据" in error for error in errors))
+
+    def test_tradeoff_context_must_reach_prompt_and_match_source(self):
+        topic = copy.deepcopy(self.topic)
+        tradeoff = topic["task_plan"][0]["difficulty_design"]["design_tradeoff"]
+        tradeoff["context_excerpt"] = "系统需要处理百万条迟到事件并校正历史窗口"
+        tradeoff["context_anchors"][0]["excerpt"] = "不存在的百万条迟到事件源码"
+        errors = self.errors(topic)
+        self.assertTrue(any("context_excerpt 不在最终题面" in error for error in errors))
+        self.assertTrue(any("excerpt 不在声明源码行内" in error for error in errors))
 
     def test_20261115_platform_accepted_choice_phrase_is_recognized(self):
         excerpt = "两版结论冲突时由你决定采用哪份"

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-TYPE_GATE_VERSION = 1
+TYPE_GATE_VERSION = 3
 TYPE_BY_SLUG = {
     "development": "功能开发",
     "bugfix": "Bugfix",
@@ -33,14 +33,7 @@ FOLDER_RE = re.compile(
     r"-(0[1-9]|[1-9][0-9])-(development|bugfix|optimization|refactor|migration)$"
 )
 
-REQUEST_PREFIXES = {
-    "功能开发": ("请新增", "请实现", "请构建", "请建立", "请开发", "请提供", "请设计"),
-    "Bugfix": ("请修复", "请纠正", "请修正"),
-    "功能优化": ("请优化", "请改善", "请提升", "请稳定", "请降低", "请精简"),
-    "代码重构": ("请重构", "请整理", "请收拢", "请抽象"),
-    "依赖升级与迁移": ("请迁移", "请升级", "请替换", "请切换"),
-}
-MAIN_TASK_PREFIXES = {
+TYPE_ACTIONS = {
     "功能开发": ("新增", "实现", "构建", "建立", "开发", "提供", "设计"),
     "Bugfix": ("修复", "纠正", "修正"),
     "功能优化": ("优化", "改善", "提升", "稳定", "降低", "精简"),
@@ -53,9 +46,14 @@ DEFECT_TERMS = (
     "返回空页", "对不上", "读取不到", "残留", "停留", "丢失",
 )
 EXISTING_TERMS = ("现有", "已有", "当前", "原本", "既有", "原有")
+ABSENCE_TERMS = (
+    "尚未", "缺少", "没有", "未形成", "未提供", "未生成", "未登记",
+    "无法说明", "只剩", "仅有", "只有",
+)
 OPTIMIZATION_TARGET_TERMS = (
     "性能", "稳定", "吞吐", "耗时", "重复", "失败", "续做", "去重", "一致",
     "一致性", "分页", "整批", "扫描", "覆盖", "冲突", "水位", "效率", "可靠",
+    "重算", "重建", "刷新", "失效", "命中", "矛盾", "变化",
 )
 REFACTOR_INVARIANT_TERMS = (
     "行为不变", "既有行为", "原有行为", "输入输出不变", "口径不变", "历史兼容",
@@ -63,6 +61,13 @@ REFACTOR_INVARIANT_TERMS = (
 MIGRATION_TERMS = (
     "版本", "依赖", "兼容", "迁移", "升级", "替换", "切换", "存量", "回滚",
 )
+TYPE_FAMILY_TERMS = {
+    "功能开发": ("新增", "新建", "新能力", "0-1"),
+    "Bugfix": ("Bugfix", "bugfix", "Bug修复", "缺陷", "修复"),
+    "功能优化": ("优化", "迭代"),
+    "代码重构": ("重构", "整理"),
+    "依赖升级与迁移": ("迁移", "升级", "依赖"),
+}
 
 
 def _text(value: Any) -> str:
@@ -80,44 +85,82 @@ def sequence_for_folder(folder: str) -> tuple[int, str] | None:
 
 
 def _intent_clause(main_request: str) -> str:
-    return re.split(r"[；。！？\n]", main_request, maxsplit=1)[0].strip()
+    return re.split(r"[。！？\n]", main_request, maxsplit=1)[0].strip()
 
 
-def _starts_with(text: str, prefixes: tuple[str, ...]) -> bool:
-    return any(text.startswith(prefix) for prefix in prefixes)
+def _type_semantic_errors(
+    task_type: str,
+    text: str,
+    *,
+    label: str,
+    subject: str,
+) -> list[str]:
+    """Check the business intent, not just whether a type keyword exists."""
+    errors: list[str] = []
+    if not text:
+        return errors
+    clause = _intent_clause(text)
+    if task_type == "功能开发":
+        if any(term in clause for term in ("修复", "优化当前", "优化现有")):
+            errors.append(
+                f"{label} 的 {subject} 把新增能力写成了修复或优化既有能力，"
+                "功能开发必须声明当前不存在、本次新增的能力"
+            )
+        if not any(term in text for term in ABSENCE_TERMS):
+            errors.append(
+                f"{label} 的 {subject} 没有说明当前能力尚未形成、缺少或没有，"
+                "无法证明这是新增能力"
+            )
+    elif task_type == "Bugfix":
+        if not any(term in clause for term in DEFECT_TERMS):
+            errors.append(
+                f"{label} 的 {subject} 开头句没有写清真实缺陷、错误现象或失败后果"
+            )
+        if any(term in clause for term in ("请新增", "新增能力", "首次实现", "从零构建")):
+            errors.append(f"{label} 的 {subject} 被写成了新增功能")
+    elif task_type == "功能优化":
+        if not any(term in clause for term in EXISTING_TERMS):
+            errors.append(
+                f"{label} 的 {subject} 开头句没有明确针对现有或已有能力"
+            )
+        if not any(term in clause for term in OPTIMIZATION_TARGET_TERMS):
+            errors.append(
+                f"{label} 的 {subject} 开头句没有写清性能、稳定性、去重、"
+                "失败恢复等现有能力优化目标"
+            )
+        if any(term in clause for term in ("请新增", "首次实现", "从零构建")):
+            errors.append(f"{label} 的 {subject} 被写成了首次新增")
+    elif task_type == "代码重构":
+        if not any(term in text for term in REFACTOR_INVARIANT_TERMS):
+            errors.append(
+                f"{label} 的 {subject} 没有写明既有行为或输入输出保持不变"
+            )
+    elif task_type == "依赖升级与迁移":
+        if not any(term in text for term in MIGRATION_TERMS):
+            errors.append(
+                f"{label} 的 {subject} 没有真实版本、兼容、存量或迁移目标"
+            )
+    return errors
 
 
 def _intent_errors(task_type: str, main_request: str, *, label: str) -> list[str]:
     errors: list[str] = []
     if not main_request:
         return [f"{label} 缺少 prompt_main_request"]
-    if not _starts_with(main_request, REQUEST_PREFIXES[task_type]):
-        expected = "、".join(REQUEST_PREFIXES[task_type])
+    if not any(action in main_request for action in TYPE_ACTIONS[task_type]):
+        expected = "、".join(TYPE_ACTIONS[task_type])
         errors.append(
-            f"{label} 的 prompt_main_request 必须以任务类型主动作开头（{expected}），"
+            f"{label} 的 prompt_main_request 必须表达任务类型主动作（{expected}），"
             f"当前为：{main_request[:32]}"
         )
-    clause = _intent_clause(main_request)
-    if task_type == "Bugfix":
-        if not any(term in clause for term in DEFECT_TERMS):
-            errors.append(
-                f"{label} 的 Bugfix 主请求开头句没有写清真实缺陷、错误现象或失败后果"
-            )
-        if any(term in clause for term in ("新增", "首次实现", "从零构建")):
-            errors.append(f"{label} 的 Bugfix 主请求开头句被写成了新增功能")
-    elif task_type == "功能优化":
-        if not any(term in clause for term in EXISTING_TERMS):
-            errors.append(f"{label} 的功能优化主请求开头句没有明确针对现有或已有能力")
-        if not any(term in main_request for term in OPTIMIZATION_TARGET_TERMS):
-            errors.append(f"{label} 的功能优化主请求没有写清性能、稳定性、去重、失败恢复等优化目标")
-        if any(term in clause for term in ("新增", "首次实现", "从零构建")):
-            errors.append(f"{label} 的功能优化主请求开头句被写成了首次新增")
-    elif task_type == "代码重构":
-        if not any(term in main_request for term in REFACTOR_INVARIANT_TERMS):
-            errors.append(f"{label} 的代码重构主请求没有写明既有行为或输入输出保持不变")
-    elif task_type == "依赖升级与迁移":
-        if not any(term in main_request for term in MIGRATION_TERMS):
-            errors.append(f"{label} 的依赖升级与迁移主请求没有真实版本、兼容、存量或迁移目标")
+    errors.extend(
+        _type_semantic_errors(
+            task_type,
+            main_request,
+            label=label,
+            subject="prompt_main_request",
+        )
+    )
     return errors
 
 
@@ -144,13 +187,25 @@ def hint_errors(topic_map: dict[str, Any]) -> list[str]:
             continue
         where = f"task_plan sequence {sequence}"
         main_task = _text(fit.get("main_task"))
-        if main_task and not _starts_with(main_task, MAIN_TASK_PREFIXES[task_type]):
+        if main_task and not any(action in main_task for action in TYPE_ACTIONS[task_type]):
             errors.append(
-                f"{where} 的 domain_fit.main_task 必须以{task_type}动作开头，"
+                f"{where} 的 domain_fit.main_task 必须表达{task_type}动作，"
                 f"当前为：{main_task[:32]}"
             )
-        if task_type == "Bugfix" and main_task and not any(term in main_task for term in DEFECT_TERMS):
-            errors.append(f"{where} 的 Bugfix main_task 没有写清真实缺陷或错误后果")
+        family = _text(plan.get("family"))
+        family_terms = TYPE_FAMILY_TERMS[task_type]
+        if not family or not any(term in family for term in family_terms):
+            errors.append(
+                f"{where} 的 family={family or '空'} 与任务类型 {task_type} 不一致"
+            )
+        errors.extend(
+            _type_semantic_errors(
+                task_type,
+                main_task,
+                label=where,
+                subject="domain_fit.main_task",
+            )
+        )
         errors.extend(
             _intent_errors(
                 task_type,
@@ -213,6 +268,14 @@ def prompt_errors(records: list[dict[str, Any]], topic_map: dict[str, Any]) -> l
                 label=f"{folder} {record_type}",
             )
         )
+        errors.extend(
+            _type_semantic_errors(
+                record_type,
+                prompt,
+                label=f"{folder} {record_type}",
+                subject="最终题面",
+            )
+        )
     return errors
 
 
@@ -233,6 +296,7 @@ def check_batch(parent: Path, *, topic_map_path: str | Path | None = None) -> di
     return {
         "ok": not errors,
         "type_gate_version": TYPE_GATE_VERSION,
+        "plans_checked": len(topic_map.get("task_plan", []) or []),
         "checked_prompts": sum(bool(_text(row.get("提示词"))) for row in rows),
         "errors": errors,
     }
@@ -242,6 +306,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="检查 S11 提示词任务类型与主请求语义")
     parser.add_argument("--parent", required=True, help="批次目录")
     parser.add_argument("--map", help="repo-topic-map.json；默认从 parent 查找")
+    parser.add_argument("--json", action="store_true", help="兼容显式 JSON 输出请求")
     args = parser.parse_args()
     result = check_batch(
         Path(args.parent).expanduser().resolve(),

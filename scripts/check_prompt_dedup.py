@@ -37,8 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import batch_prompt_workbook as workbook_lib  # noqa: E402
-from prompt_history_lib import detect_prefix, load_history  # noqa: E402
-import review_contract  # noqa: E402
+from prompt_history_lib import detect_prefix, load_history, strip_legacy_context_boilerplate  # noqa: E402
 
 
 DEFAULT_THRESHOLD = 0.2
@@ -92,10 +91,7 @@ SCAFFOLDING_SENTENCE_PATTERNS = (
 
 
 def normalize(text: str) -> str:
-    business_text = str(text or "").replace(
-        review_contract.CONTEXT_STATEMENT,
-        "",
-    )
+    business_text = strip_legacy_context_boilerplate(text)
     return PUNCTUATION.sub("", business_text)
 
 
@@ -193,7 +189,7 @@ def task_type_from_label(label: str) -> str:
 
 
 def strip_scaffolding(text: str) -> str:
-    business_text = str(text or "").replace(review_contract.CONTEXT_STATEMENT, "")
+    business_text = strip_legacy_context_boilerplate(text)
     kept: list[str] = []
     for sentence in re.split(r"(?<=[。；！？])", business_text):
         sentence = sentence.strip()
