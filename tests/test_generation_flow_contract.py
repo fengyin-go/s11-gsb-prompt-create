@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+
+def test_semantic_topic_map_example_tracks_current_contract() -> None:
+    from difficulty_contract import H3_FALSE_GUARDS
+
+    example = (ROOT / "references" / "semantic-v2-topic-map.md").read_text(
+        encoding="utf-8"
+    )
+    assert '"workload_design"' in example
+    for guard in H3_FALSE_GUARDS:
+        assert f'"{guard}"' in example
 
 
 def test_default_prompt_generation_has_no_user_confirmation_gate() -> None:
@@ -15,7 +28,7 @@ def test_default_prompt_generation_has_no_user_confirmation_gate() -> None:
     combined = "\n".join((skill, rules, hardening))
 
     assert "默认出题流程不设置用户确认节点" in skill
-    assert "不等待用户确认；通过后直接生成正式 36 条" in skill
+    assert "通过后直接生成\n与有效容量一致的正式题位" in skill
     assert "样稿自动准入" in skill
     assert "通过后直接进入正式生成，不等待用户确认" in rules
     assert "自动准入通过后直接进入正式写表，不等待用户确认" in hardening

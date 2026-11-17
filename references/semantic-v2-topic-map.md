@@ -65,6 +65,41 @@
           "data_artifact": "已发布订单明细数据集",
           "prompt_excerpt": "分析导出中心必须读取同一份已发布订单明细数据集并保留来源批次。"
         },
+        "workload_design": {
+          "version": 1,
+          "expected_effective_tool_calls": 60,
+          "call_floor_rationale": "需要完成订单解析、发布恢复、导出消费和两条独立验证路径",
+          "work_slices": [
+            {
+              "module": "订单解析",
+              "implementation": "补齐订单明细与来源批次写入",
+              "data_result": "生成带来源批次的订单明细记录",
+              "verification": "核对明细与来源批次同时可见"
+            },
+            {
+              "module": "订单解析",
+              "implementation": "补齐发布中断后的缺失记录定位",
+              "data_result": "生成只包含未完成记录的恢复批次",
+              "verification": "中断重试不会覆盖完整发布结果"
+            },
+            {
+              "module": "分析导出中心",
+              "implementation": "读取发布结果并生成导出文件",
+              "data_result": "生成可追溯的订单明细导出文件",
+              "verification": "导出文件与发布结果逐字段一致"
+            },
+            {
+              "module": "分析导出中心",
+              "implementation": "处理迟到更正后的导出重建",
+              "data_result": "生成受影响业务窗口的补算清单",
+              "verification": "补算清单可以回查完整发布结果"
+            }
+          ],
+          "verification_paths": [
+            "运行订单发布入口并验证中断恢复",
+            "运行导出中心并比较导出文件与发布结果"
+          ]
+        },
         "design_tradeoff": {
           "decision": "恢复边界按采集时间还是业务时间确定",
           "decision_axis": "effective_time",
@@ -119,7 +154,9 @@
             "implementation_only": false,
             "retry_or_error_message_only": false,
             "display_only": false,
-            "single_result_invariant_only": false
+            "single_result_invariant_only": false,
+            "source_selection_only": false,
+            "equivalent_user_outcome": false
           },
           "false_h3_counterexample": "先规定迟到更正必须采用业务时间，再要求设计者选择恢复边界",
           "decision_impact": "恢复时间轴改变迟到订单的补算范围与下游文件内容",
@@ -198,7 +235,7 @@
 }
 ```
 
-示例只展示字段，不是可直接建 20 题的完整计划；topic 座位与 task_plan 必须按实际容量补齐。`domain`、`subdirection`、每个 topic 的 `domain_objects`/`domain_results`、每个题位的 `domain_fit` 都是建仓、写表和交接的硬输入。`domain_fit.source_evidence` 必须指向基准提交里真实存在的源码或页面依据，不能用仓库标题、README 口号或计划以后才实现的文件。slug/type 使用 SKILL.md 五类一一对应。sequence 为正整数且唯一，可保留撤题空号；目录和仓库同名，均为 `<原仓库名>-<sequence两位数>-<slug>`；工作簿编号 = start-index + sequence - 1。每条 family/angle 必填，同 topic 不重复 family，family 必须在 allowed_families 内（未指定 allowed_families 时不限）。每 topic seat_capacity 为 1..3，单仓默认上限 50，每模式默认 3。任务条数不得超过容量与 max_capacity。
+示例只展示字段，不是可直接建 20 题的完整计划；topic 座位与 task_plan 必须按实际容量补齐。`max_capacity` 是包含新增主体座位在内的绝对上限。新正式批次的 `task_plan` 必须填满最终有效容量；已有批次恢复时保留原题位。`domain`、`subdirection`、每个 topic 的 `domain_objects`/`domain_results`、每个题位的 `domain_fit` 都是建仓、写表和交接的硬输入。`domain_fit.source_evidence` 必须指向基准提交里真实存在的源码或页面依据，不能用仓库标题、README 口号或计划以后才实现的文件。slug/type 使用 SKILL.md 五类一一对应。sequence 为正整数且唯一，可保留撤题空号；目录和仓库同名，均为 `<原仓库名>-<sequence两位数>-<slug>`；工作簿编号 = start-index + sequence - 1。每条 family/angle 必填，同 topic 不重复 family，family 必须在 allowed_families 内（未指定 allowed_families 时不限）。每 topic seat_capacity 为 1..3，单仓默认上限 50，每模式默认 3。
 
 最终题面除命中 topic、`domain_objects` 和 `domain_results` 外，还必须逐字写入 `domain_chain` 的输入、处理、输出、可观察结果以及前置的 `prompt_main_request`。脚本会核对源码锚点、连续原文和主请求位置；只出现业务名词、把领域句放在末尾或替换对象后仍是通用服务任务，都会在写表前被拦下。细节见 [domain-fit.md](domain-fit.md)。
 

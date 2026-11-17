@@ -34,6 +34,7 @@ if str(SOLO_CREATE_SCRIPTS) not in sys.path:
 import batch_prompt_workbook as workbook_lib  # noqa: E402
 import check_prompt_dedup as dedup_lib  # noqa: E402
 import check_repo_theme as theme_lib  # noqa: E402
+import cross_project_cache as cache_lib  # noqa: E402
 import prompt_cross_project_registry as registry_lib  # noqa: E402
 
 
@@ -491,6 +492,7 @@ def check_platform_corpus(
     *,
     max_similarity: float = DEFAULT_PLATFORM_MAX_SIMILARITY,
     max_common_fragment: int = DEFAULT_PLATFORM_MAX_COMMON_FRAGMENT,
+    cache: cache_lib.CrossProjectCache | None = None,
 ) -> dict[str, object]:
     comparisons: list[dict[str, object]] = []
     raw_pair_records: list[dict[str, object]] = []
@@ -501,12 +503,25 @@ def check_platform_corpus(
         for peer in peers:
             if _prompt_self_match(candidate, peer):
                 continue
-            result = compare_platform_prompt(
-                candidate,
-                peer,
-                max_similarity=max_similarity,
-                max_common_fragment=max_common_fragment,
+            settings = {
+                "max_similarity": max_similarity,
+                "max_common_fragment": max_common_fragment,
+                "min_common_han": DEFAULT_PLATFORM_MIN_COMMON_HAN,
+            }
+            result = (
+                cache.get("platform-compare", candidate, peer, settings)
+                if cache is not None
+                else None
             )
+            if result is None:
+                result = compare_platform_prompt(
+                    candidate,
+                    peer,
+                    max_similarity=max_similarity,
+                    max_common_fragment=max_common_fragment,
+                )
+                if cache is not None:
+                    cache.put("platform-compare", candidate, peer, settings, result)
             raw_pair_records.append({
                 "left_item": candidate,
                 "right_item": peer,
@@ -558,6 +573,50 @@ def check_forbidden_topics(candidates: list[dict[str, str]]) -> list[dict[str, o
                     "message": f"命中平台雷同题库「{category}」：{term}；{reason}",
                 })
     return violations
+
+
+def _compare_for_gate(
+    candidate: dict[str, str],
+    peer: dict[str, str],
+    *,
+    max_text_overlap: float,
+    max_semantic_similarity: float,
+    cache: cache_lib.CrossProjectCache | None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    raw_settings = {"check_internal": False, "rule": "raw-a5"}
+    raw = (
+        cache.get("local-raw-a5", candidate, peer, raw_settings)
+        if cache is not None
+        else None
+    )
+    if raw is None:
+        raw = dedup_lib.check_raw_a5(
+            str(candidate.get("prompt") or ""),
+            str(peer.get("prompt") or ""),
+            check_internal=False,
+        )
+        if cache is not None:
+            cache.put("local-raw-a5", candidate, peer, raw_settings, raw)
+
+    compare_settings = {
+        "max_text_overlap": max_text_overlap,
+        "max_semantic_similarity": max_semantic_similarity,
+    }
+    result = (
+        cache.get("local-compare", candidate, peer, compare_settings)
+        if cache is not None
+        else None
+    )
+    if result is None:
+        result = compare_prompts(
+            candidate,
+            peer,
+            max_text_overlap=max_text_overlap,
+            max_semantic_similarity=max_semantic_similarity,
+        )
+        if cache is not None:
+            cache.put("local-compare", candidate, peer, compare_settings, result)
+    return raw, result
 
 
 def load_candidate_file(path: Path, task_type: str) -> list[dict[str, str]]:
@@ -690,6 +749,7 @@ def check(
     *,
     max_text_overlap: float = DEFAULT_MAX_TEXT_OVERLAP,
     max_semantic_similarity: float = DEFAULT_MAX_SEMANTIC_SIMILARITY,
+    cache: cache_lib.CrossProjectCache | None = None,
 ) -> dict[str, object]:
     comparisons: list[dict[str, object]] = []
     raw_pair_records: list[dict[str, object]] = []
@@ -699,21 +759,18 @@ def check(
     max_fragment = 0
     for candidate in candidates:
         for peer in peers:
-            raw_pair_records.append({
-                "left_item": candidate,
-                "right_item": peer,
-                "result": dedup_lib.check_raw_a5(
-                    str(candidate.get("prompt") or ""),
-                    str(peer.get("prompt") or ""),
-                    check_internal=False,
-                ),
-            })
-            result = compare_prompts(
+            raw_result, result = _compare_for_gate(
                 candidate,
                 peer,
                 max_text_overlap=max_text_overlap,
                 max_semantic_similarity=max_semantic_similarity,
+                cache=cache,
             )
+            raw_pair_records.append({
+                "left_item": candidate,
+                "right_item": peer,
+                "result": raw_result,
+            })
             max_text = max(max_text, float(result["text_overlap"]))
             max_semantic = max(max_semantic, float(result["semantic_similarity"]))
             max_fragment = max(max_fragment, len(str(result["longest_common_fragment"])))
@@ -731,11 +788,29 @@ def check(
 
     raw_internal_records: list[dict[str, object]] = []
     for candidate in candidates:
-        repeat = dedup_lib.longest_internal_raw_repeat(str(candidate.get("prompt") or ""))
+        internal_settings = {"rule": "raw-a5-internal"}
+        cached = (
+            cache.get("local-raw-internal", candidate, None, internal_settings)
+            if cache is not None
+            else None
+        )
+        if cached is None:
+            repeat = dedup_lib.longest_internal_raw_repeat(
+                str(candidate.get("prompt") or "")
+            )
+            cached = {"length": len(repeat), "fragment": repeat}
+            if cache is not None:
+                cache.put(
+                    "local-raw-internal",
+                    candidate,
+                    None,
+                    internal_settings,
+                    cached,
+                )
         raw_internal_records.append({
             "item": candidate,
-            "length": len(repeat),
-            "fragment": repeat,
+            "length": cached["length"],
+            "fragment": cached["fragment"],
         })
     raw_a5 = dedup_lib.summarize_raw_a5(raw_pair_records, raw_internal_records)
     violations.extend(raw_a5["raw_a5_violations"])
@@ -879,6 +954,15 @@ def main() -> None:
         "--max-semantic-similarity",
         type=float,
         default=DEFAULT_MAX_SEMANTIC_SIMILARITY,
+    )
+    parser.add_argument(
+        "--cache-dir",
+        help="跨项目比较增量缓存目录；默认使用用户缓存目录，不写入批次工作簿",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="禁用增量缓存并执行全部两两比较",
     )
     args = parser.parse_args()
 
@@ -1077,11 +1161,46 @@ def main() -> None:
                     "path": str(platform_path),
                     "message": str(exc),
                 })
+    cache = None
+    if not args.no_cache:
+        default_path = cache_lib.default_cache_path(batch_dir)
+        cache_path = (
+            Path(args.cache_dir).expanduser().resolve()
+            if args.cache_dir
+            else default_path
+        )
+        if cache_path is not None and cache_path.suffix.lower() != ".json":
+            cache_path = cache_path / "cache-v1.json"
+        cache_inputs = [registry_path]
+        cache_inputs.extend(
+            str(item["workbook"])
+            for item in peers
+            if item.get("workbook")
+        )
+        if platform_enabled and platform_path is not None:
+            cache_inputs.append(platform_path)
+        implementation_sha256 = {
+            path.name: cache_lib.file_sha256(path)
+            for path in (
+                Path(__file__).resolve(),
+                SCRIPT_DIR / "cross_project_cache.py",
+                SCRIPT_DIR / "check_prompt_dedup.py",
+                SCRIPT_DIR / "check_repo_theme.py",
+                SCRIPT_DIR / "batch_prompt_workbook.py",
+            )
+            if path.is_file()
+        }
+        digest = cache_lib.corpus_fingerprint(
+            cache_inputs,
+            extra={"implementation_sha256": implementation_sha256},
+        )
+        cache = cache_lib.CrossProjectCache(cache_path, corpus_digest=digest)
     platform_result = check_platform_corpus(
         candidates,
         platform_peers,
         max_similarity=platform_max_similarity,
         max_common_fragment=platform_max_common_fragment,
+        cache=cache,
     )
     platform_raw_a5 = dedup_lib.summarize_raw_a5(
         platform_result.pop("raw_a5_pairs", []),
@@ -1094,7 +1213,13 @@ def main() -> None:
         peers,
         max_text_overlap=args.max_text_overlap,
         max_semantic_similarity=args.max_semantic_similarity,
+        cache=cache,
     )
+    if cache is not None:
+        try:
+            cache.save()
+        except OSError as exc:
+            cache.stats["save_error"] = str(exc)
     coverage_ok = not coverage_issues
     platform_ok = platform_result["ok"] and not platform_issues
     forbidden_ok = not forbidden_violations
@@ -1168,6 +1293,7 @@ def main() -> None:
             "raw_a5_min_common_length": dedup_lib.RAW_A5_MIN_COMMON_LENGTH,
             "raw_a5_platform_window_size": dedup_lib.RAW_A5_PLATFORM_WINDOW_SIZE,
         },
+        "cache": cache.stats if cache is not None else {"enabled": False},
     })
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result["ok"]:

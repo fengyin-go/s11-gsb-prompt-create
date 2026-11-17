@@ -175,6 +175,62 @@ class OpportunityMapTest(unittest.TestCase):
             "opportunities": selected + reserve,
         }
 
+    def write_capacity_payload(self, count: int) -> None:
+        plans = []
+        mode_sequence = []
+        for index in range(count):
+            mode = self.modes[index % len(self.modes)]
+            mode_sequence.append(mode)
+            plans.append({
+                "sequence": index + 1,
+                "slug": "development",
+                "task_type": "功能开发",
+                "topic": f"topic-{index % 18}",
+                "family": f"新增能力-{index}",
+                "angle": mode,
+                "domain_fit": {"prompt_main_request": self.plans_prompt(mode)},
+                "difficulty_design": {"version": 3},
+            })
+        self.topic_map["task_plan"] = plans
+        self.map_path.write_text(
+            json.dumps(self.topic_map, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self.git("add", "-A")
+        self.git(
+            "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "-c", "commit.gpgsign=false", "commit", "-q", "-m", f"map-{count}",
+        )
+        self.head = self.git("rev-parse", "HEAD")
+        selected = [
+            self.brief(index, mode=mode, status="selected")
+            for index, mode in enumerate(mode_sequence)
+        ]
+        used_modes = list(dict.fromkeys(mode_sequence))
+        reserve = [
+            self.brief(100 + index, mode=mode, status="reserve")
+            for index, mode in enumerate(used_modes)
+        ]
+        mode_counts = {
+            mode: mode_sequence.count(mode)
+            for mode in used_modes
+        }
+        self.payload = {
+            "schema_version": 1,
+            "source_project": "repo",
+            "source_commit": self.head,
+            "source_base_commit": self.base,
+            "repo_topic_map_sha256": hashlib.sha256(self.map_path.read_bytes()).hexdigest(),
+            "target_count": count,
+            "selected_count": count,
+            "reserve_count": len(reserve),
+            "selection_policy": opportunities.CAPACITY_SELECTION_POLICY,
+            "mode_counts": mode_counts,
+            "reserve_mode_counts": {mode: 1 for mode in used_modes},
+            "opportunities": selected + reserve,
+        }
+        self.write_payload()
+
     def write_payload(self):
         self.opportunity_path.parent.mkdir(parents=True, exist_ok=True)
         self.opportunity_path.write_text(
@@ -187,6 +243,26 @@ class OpportunityMapTest(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["selected_count"], 36)
         self.assertEqual(result["reserve_count"], 12)
+
+    def test_capacity_payload_uses_actual_topic_plan_count(self):
+        self.write_capacity_payload(8)
+        result = opportunities.check(self.repo, self.map_path, self.opportunity_path)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["target_count"], 8)
+        self.assertEqual(result["selected_count"], 8)
+        self.assertEqual(result["reserve_count"], 8)
+        self.assertEqual(
+            result["selection_policy"],
+            opportunities.CAPACITY_SELECTION_POLICY,
+        )
+
+    def test_capacity_payload_must_match_topic_plan_count(self):
+        self.write_capacity_payload(8)
+        self.payload["target_count"] = 9
+        self.write_payload()
+        result = opportunities.check(self.repo, self.map_path, self.opportunity_path)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("task_plan 数量 8" in error for error in result["errors"]))
 
     def test_map_inside_repo_is_rejected(self):
         inside = self.repo / "prompt-opportunities.json"

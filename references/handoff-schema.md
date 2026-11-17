@@ -60,7 +60,8 @@
     "subdirection": "必须与 repo-topic-map.json 的 subdirection 一致",
     "language": "Python",
     "frameworks": "实际语言与框架版本",
-    "repro_level": "已容器化，可一键起环境"
+    "repro_level": "已容器化，可一键起环境",
+    "repro_evidence": "真实镜像首次安装和无安装重启均通过；说明留在这里，不写进枚举"
   },
   "tasks": {
     "cc10003-01-bugfix": {
@@ -121,6 +122,34 @@
 }
 ```
 
+`repro_level` 只能使用平台枚举：
+
+- `无外部依赖`
+- `有外部依赖，未容器化`
+- `已容器化，可一键起环境`
+
+安装经过、镜像架构、首次安装和无安装重启说明写入 `repro_evidence`。`prepare_handoff.py`
+会在写 `task.json` 前调用 `platform_contract.py` 校验领域、子方向、任务类型、难度、
+操作系统、`repro_level`、Harness 版本和 Web 页面方案；非法值指出原值、允许值和应迁移到
+证据字段的内容。
+
+Web 录屏方案必须声明 `pages`，每个 `steps[]` 用 `page` 指向真实页面：
+
+```json
+{
+  "mode": "web",
+  "serve_cmd": "npm run dev -- --host {host} --port {port}",
+  "pages": [
+    {"id": "home", "path": "/", "ready_selector": "#app", "min_visible_seconds": 2},
+    {"id": "detail", "path": "/detail", "ready_selector": "#detail", "min_visible_seconds": 2}
+  ],
+  "steps": [
+    {"action": "click", "selector": "#open-detail", "page": "home"},
+    {"action": "expect_text", "selector": "#detail", "text": "已保存", "page": "detail"}
+  ]
+}
+```
+
 同一批的代表性 smoke 可引用同份证据，但该证据须涵盖本批技术栈、依赖来源和运行环境，不能只写 true。容器架构与宿主不同或依赖含 native 组件时，实际运行环境必须另验证，不能从宿主启动成功推断容器成功。
 
 `prepare_handoff.py` 不执行参考解、不调用模型。它从 tasks.xlsx 原样取题面，从仓库清单取 GitHub 地址和初始提交，并再次运行领域题位闸。输出使用 `producer=s11-gsb-prompt-create`、`execution_mode=single`、`branch=main`，把每个题位的 v2 `domain_contract`（domain、subdirection、topic、主任务、领域结果、`domain_chain`、前置 `prompt_main_request`、带行号源码锚点、反事实通用任务、pass 结论）冻结进 `task.json`，同时把 producer/execution_mode/branch、origin/workspace 路径和领域契约纳入 hash 与批次清单。运行侧会拒绝 A/B 目录、错误分支、错误路径、旧版或字段不全的 v2 领域契约以及输入漂移。
@@ -128,6 +157,10 @@
 新批次 `batch-manifest.json` 必须带 `review_contract_required: true`。运行侧加载任务时，
 若清单要求契约但 `task.json.review_contract` 缺失、`review-contract.json` 内容不一致或摘要不符，
 直接拒绝交接。
+
+`batch-manifest.json.prompt_opportunities` 是可选生成溯源。新批次在出题交接时会写入并校验，
+但运行侧接收旧批次时不要求该字段或地图文件存在；缺失、路径不可访问或只保留历史绑定时都不能
+阻断运行、评审和平台提交。
 
 origin 始终保留初始提交与依赖，workspace 只克隆已提交的源码，起跑时没有缓存或被忽略文件。初始地址固定 `/commit/<SHA>`；产物后续推到 main，不增设其他分支。
 

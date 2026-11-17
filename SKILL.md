@@ -15,6 +15,74 @@ description: "solo11 单轮 pointwise 批量出题：可从 GitHub/Git 仓库或
 直接进入正式工作簿生成与后续闸门，不暂停等待用户认可。只有用户明确要求“只先看预览”
 时，才按指定范围展示预览并暂时不写正式工作簿；不需要再次询问是否可以继续。
 
+## 高速执行路径
+
+提速只允许压缩等待和重复计算，不允许减少检查面或降低阈值。正式批次按以下顺序执行：
+
+1. 完成容量排序、题位冻结、启动预检，并通过 topic map 的领域、类型和困难设计检查。
+2. 立即冻结 GitHub 建仓队列并启动后台 worker；它可以在前台继续做源码审计和题面设计时
+   承担逐个建仓、频控等待、推送、克隆和最终远端复检。
+3. 题面按题位继续逐条设计，不做“先写完全部再一次性发现问题”的流程。每条样稿仍先过
+   表达、自然度、领域、类型和 H1/H2/H3 自动准入。
+4. 全量候选先运行一次只读聚合预检，把同一候选在所有门禁上的问题一次列出并集中返修。
+5. 聚合预检通过后才调用 `update-many` 正式写表。跨项目查重默认读取增量缓存，只重算
+   新题面、阈值变化或语料变化涉及的两两比较。
+6. 写表完成后仍执行全部正式闸、最终全量复检、工作簿回读、交接清单和 `fbr_run` dry-run。
+   缓存命中、后台建仓完成或聚合计通过都不能替代这些最终检查。
+
+后台建仓命令：
+
+```bash
+# 先冻结队列；该步骤只验证计划，不逐个查询或创建任务仓库
+python3 <skill>/scripts/create_batch_tasks.py \
+  --parent <root>/batches/b1111-01 \
+  --source <源仓库或冻结快照> \
+  --topic-map <batch目录>/repo-topic-map.json \
+  --preflight <batch目录>/startup-preflight.json \
+  --start-index 123 --queue
+# 本地冻结快照模式再加 --snapshot-manifest <batch目录>/source-snapshot.json
+
+# 启动独立后台 worker；日志写入 <batch目录>/creation-worker.log
+python3 <skill>/scripts/create_batch_tasks.py \
+  --parent <root>/batches/b1111-01 --resume --detach
+
+# 随时只读查看逐个仓库的阶段、重试时间和错误
+python3 <skill>/scripts/create_batch_tasks.py \
+  --parent <root>/batches/b1111-01 --status
+
+# 前台恢复；也可加 --detach 再次转入后台
+python3 <skill>/scripts/create_batch_tasks.py \
+  --parent <root>/batches/b1111-01 --resume
+```
+
+`creation-queue.json` 冻结 owner/repo、基准提交、阶段、attempts、重试时间和错误；
+单 worker 文件锁阻止两个进程同时消费同一队列。worker 逐个恢复时仍只复用 journal
+登记的本批仓库。所有逐仓任务完成后，它会再跑一次不加筛选的完整建仓复检，确认 origin、
+workspace、远端仅有 main 和清单一致，然后才生成工作簿。非限流错误会保留为
+`failed`，不会改名或认领陌生仓库；权限、认证和仓库冲突仍需按实际错误处理。
+
+聚合预检命令：
+
+```bash
+python3 <skill>/scripts/preflight_batch.py \
+  --parent <batch目录> \
+  --repo <任务目录>/origin \
+  --topic-map <batch目录>/repo-topic-map.json \
+  --opportunity-map <parent>/prompt-opportunities/<project_id>.json \
+  --require-opportunity-map \
+  --candidates-file <完整候选JSON> \
+  --output <batch目录>/preflight-report.json
+```
+
+预检是只读入口，按候选和规则同时汇总表达、自然度、领域、类型、困难契约、主题、
+结构难度、批内 A-5/查重、G16/G19 strict、跨项目和平台语料问题。未提供完整题面时默认
+失败；只有明确查看中途状态才可加 `--allow-pending`，正式写表前必须去掉。
+
+跨项目缓存默认位于用户缓存目录，不在批次业务目录或 Git 仓库内。缓存键绑定题面、
+任务类型、阈值、checker 版本、注册表、peer 工作簿和平台语料哈希；任一来源变化都会
+自动失效。需要取证式全量重算时传 `--no-cache`，或在 `gsb-cross-project.json` 设置
+`cache_enabled: false`；`cache_dir` 可指定独立机器本地目录。
+
 ## 默认容量优先与任务类型
 
 | 任务类型（写表和交接使用这个原名） | slug | 建议比例 | 题意 |
@@ -42,9 +110,9 @@ description: "solo11 单轮 pointwise 批量出题：可从 GitHub/Git 仓库或
 题位阶段查 `main_task`、`prompt_main_request`、`family`、slug 和类型；写表及交接阶段
 再查工作簿最终题面。该闸与领域、难度、主题和查重闸并列，不能用备注放行。
 
-正式批次默认目标为 36 条：12 个可用需求模式各 3 条。`30/30/30/5/5` 仅作任务类型建议；真实 Bugfix、重构或迁移目标不足时，使用其他有证据支持的类型填满有效题位，不因类型比例减少题数。不得编造缺陷、放宽难度、去重、topic 家族或模式上限来凑容量。不出代码理解，不把普通工程化泛题标作依赖升级。
+正式批次数量取仓库有效容量，不再固定 36 条。有效容量小于 36 时按实际容量生成并交付；容量大于 36 时按 12 个可用需求模式、每模式最多 3 条封顶为 36 条。题位数量必须先由 `compute_capacity` 和 `seat_capacity` 决定，再生成同数量的机会卡与工作簿行；不能为凑固定数量编造缺陷、放宽难度、去重、topic 家族或模式上限。`30/30/30/5/5` 仅作任务类型建议，真实 Bugfix、重构或迁移目标不足时使用其他有证据支持的类型。不出代码理解，不把普通工程化泛题标作依赖升级。
 
-`scripts/s11_policy.py` 统一校验五类名称；topic map 的 `type_policy` 默认 `capacity-first`，只有用户明确要求固定比例时才设 `strict-ratio`。`allocate_counts` 保留最大余数法作为建议；计划、建仓和交接遵守同一策略。正式 36 条中任何一个模式不足 3 条都必须补真实业务或换候选，不能降级交付。
+`scripts/s11_policy.py` 统一校验五类名称；topic map 的 `type_policy` 默认 `capacity-first`，只有用户明确要求固定比例时才设 `strict-ratio`。`allocate_counts` 保留最大余数法作为建议；计划、建仓和交接遵守同一策略。需求模式按实际题位数均匀铺开，每模式不超过 3；有足够题位时覆盖全部 12 个可用模式。
 
 2026-11-16 起，新批次必须填写 `difficulty_contract_version: 3`，并为每个
 `task_plan[]` 写结构化的 `difficulty_design`（H1 硬推理约束、H2 数据流模块整合、
@@ -73,6 +141,9 @@ GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositorie
   source-snapshot/                    本地目录模式：独立 Git 快照，作为所有任务仓库的共同 main 基线
   startup-preflight.json
   tasks.xlsx
+  creation-queue.json                推荐建仓队列与逐仓状态
+  creation-worker.log                后台 worker 日志
+  preflight-report.json              只读聚合预检报告
   s11-task-repos.json
   handoff-metadata.json
   batch-manifest.json                 交接时生成
@@ -127,7 +198,11 @@ python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map
 python3 <skill>/scripts/check_prompt_type_intent.py --parent <batch目录> --json
 python3 <skill>/scripts/domain_fit.py --parent <batch目录> --repo <源仓库>
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123 --dry-run
-# 核对演练清单后，去掉 --dry-run 创建并发布初始仓库
+# 推荐：冻结并后台建仓，前台同时继续源码审计和题面设计
+python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123 --queue
+python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --resume --detach
+
+# 兼容同步路径：核对演练清单后，去掉 --dry-run 创建并发布初始仓库
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123
 
 # 本地目录快照模式：--source 指向冻结快照，并额外传清单
@@ -186,8 +261,9 @@ H3 不是“题面出现冲突”，也不是“登记了两个选项”。每�
 
 ### 提示词机会地图与自然成稿
 
-由 `s11-cc-repo-create` 生成的批次必须提供仓库外机会地图，默认路径为
-`<parent>/prompt-opportunities/<project_id>.json`。不得把机会地图提交进生成仓库。
+所有正式新批次必须提供仓库外机会地图，默认路径为
+`<parent>/prompt-opportunities/<project_id>.json`。旧批次和既有项目可以没有地图，
+`s11-feedback-run` 对两种输入都必须兼容。不得把机会地图提交进生成仓库。
 格式与使用约束见 [references/prompt-opportunities.md](references/prompt-opportunities.md)。
 使用前读取 [references/natural-prompt-style.md](references/natural-prompt-style.md) 并运行：
 
@@ -215,8 +291,9 @@ python3 <skill>/scripts/check_prompt_opportunities.py \
 必须先形成单一连贯需求，再运行 `check_prompt_naturalness.py`。若契约或自然度不过，
 重写对应段落或整篇，不得以文末追加补充句的方式修补。
 
-大批量生成前先生成 3 条不同任务类型的自然样稿，在内部自动完成表达、自然度、领域和
-H1/H2/H3 准入，不等待用户确认；通过后直接生成正式 36 条。技术闸全部通过不等于自然度
+大批量生成前先生成最多 3 条不同任务类型的自然样稿；有效容量不足 3 条时按实际题位生成。
+样稿在内部自动完成表达、自然度、领域和 H1/H2/H3 准入，不等待用户确认；通过后直接生成
+与有效容量一致的正式题位。技术闸全部通过不等于自然度
 通过；故事卡、领域证据和最终题面必须逐题一致。
 
 ### 样稿自动准入
@@ -250,7 +327,11 @@ python3 <skill>/scripts/check_prompt_preview.py --candidate <独立样稿.json> 
 python3 <skill>/scripts/sync_platform_prompt_corpus.py
 python3 <skill>/scripts/check_repo_theme.py --parent <batch目录> --repo <任务目录>/origin --topic-map <batch目录>/repo-topic-map.json --require-topic-map --write-ledger --write-feature-points --max-per-mode 3
 python3 <skill>/scripts/batch_prompt_workbook.py scan --parent <batch目录>
+python3 <skill>/scripts/preflight_batch.py --parent <batch目录> --repo <任务目录>/origin --topic-map <batch目录>/repo-topic-map.json --opportunity-map <外部机会地图> --require-opportunity-map --candidates-file <候选JSON> --output <batch目录>/preflight-report.json
 python3 <skill>/scripts/batch_prompt_workbook.py update-many --parent <batch目录> --repo <任务目录>/origin --topic-map <batch目录>/repo-topic-map.json --opportunity-map <外部机会地图> --require-topic-map --candidates-file <候选JSON> --max-per-mode 3
+
+# 以下单项检查器用于排错；正常流程由 preflight_batch、update-many 和 prepare_handoff
+# 内部统一调用，不要为同一份未变化的工作簿反复手工全量执行。
 python3 <skill>/scripts/check_prompt_type_intent.py --parent <batch目录> --json
 python3 <skill>/scripts/check_prompt_g16.py --parent <batch目录>
 python3 <skill>/scripts/check_prompt_g16.py --parent <batch目录> --strict
@@ -276,6 +357,10 @@ P5、P6 和 A-5 属于出题侧；私有轨迹读取属于运行侧。只有失�
 ## 4. 交接给运行侧
 
 复核每题的领域准入证据后，读 [references/handoff-schema.md](references/handoff-schema.md)，准备真实的领域/语言元数据、逐项 requirements、`review_contract` 和可执行录屏方案。`review_contract` 必须把每个需求映射到具体业务行为、证据类型和成功信号；测试只写真实行为映射，不写泛化总数；环境、网关、端口、进程清理和工具缺失统一列为不扣分噪声。交接不得向最终题面追加上下文隔离声明或其他信息来源限制。`_config/settings.json` 中镜像摘要必须来自本机真实预检，不猜另一架构的值。原 `cc-domain-task-create` 不是本批必经入口。同一基础仓库、基线和镜像的所属领域、子方向、语言/框架、Harness、Harness 版本、操作系统及环境可复现等级仅在 metadata.common 核实一次，交接生成公共档案供其余题和后续同身份批次复用，不逐题重新生成。`metadata.common` 的领域和子方向必须与 topic map 一致；交接会把该题位的 `domain_contract` 冻结进 `task.json`，运行侧按 hash 校验；`review_contract` 原文写入 `review-contract.json`，摘要写入 `task.json`。公共领域字段不能免除逐题语义核验；不相符时更换题位，不靠改领域字段、挪账号或追加业务名词放行。
+
+`prepare_handoff.py` 在写任何交接文件前调用 `platform_contract.py`：领域、子方向、
+任务类型、难度、操作系统和 `repro_level` 必须是平台枚举；安装和镜像经过写入
+`repro_evidence`。新 Web 录屏方案同时校验 `pages`、页面动作归属和 12 秒页面预算。
 
 ```bash
 python3 <skill>/scripts/check_review_contract.py --parent <batch目录> --metadata <batch目录>/handoff-metadata.json --json

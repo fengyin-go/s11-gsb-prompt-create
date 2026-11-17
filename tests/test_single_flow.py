@@ -6,7 +6,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -58,7 +60,7 @@ class SingleFlow(unittest.TestCase):
         sh(self.source, "remote", "add", "origin", str(self.source_bare))
         self.remote_repos = {}
         self.topic = {"version": 1, "profile": "gsb-semantic-v2", "base_commit": self.commit,
-                      "domain": "测试领域", "subdirection": "测试方向",
+                      "domain": "数据工程", "subdirection": "其他",
                       "difficulty_contract_version": 3,
                       "max_capacity": 1, "topics": [{"id": "orders", "name": "订单", "module": "orders",
                         "keywords": ["订单", "订单项"], "evidence": ["src/orders.py"],
@@ -274,6 +276,118 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(result["tasks"][0]["folder"], "cc10003-01-development")
         self.assertEqual(result["tasks"][0]["task_id"], "cc10003-01-development")
 
+    def test_background_queue_worker_creates_then_runs_final_full_check(self):
+        self.wire_git()
+        queued = create.freeze_queue(
+            self.parent,
+            self.source,
+            self.parent / "repo-topic-map.json",
+            preflight=self.parent / "startup-preflight.json",
+            owner="selftest",
+        )
+        self.assertEqual(queued["status"], "queued")
+        self.assertTrue((self.parent / create.QUEUE_FILE).is_file())
+        self.assertFalse(self.remote_repos)
+        self.assertEqual(create.hub.repo_exists.call_count, 0)
+
+        completed = create.run_queue_worker(self.parent)
+
+        self.assertEqual(completed["status"], "complete")
+        self.assertEqual(completed["status_counts"], {"verified": 1})
+        self.assertTrue(completed["tasks"][0]["stage"])
+        queue = create.load_queue(self.parent)
+        self.assertEqual(queue["tasks"][0]["status"], "verified")
+        self.assertTrue(queue["final_verification"]["ok"])
+        task = self.parent / "cc10003-01-development"
+        self.assertTrue((task / "origin/.git").is_dir())
+        self.assertTrue((self.parent / "tasks.xlsx").is_file())
+
+    def test_queue_detach_uses_independent_session_and_log(self):
+        self.wire_git()
+        create.freeze_queue(
+            self.parent,
+            self.source,
+            self.parent / "repo-topic-map.json",
+            preflight=self.parent / "startup-preflight.json",
+            owner="selftest",
+        )
+        with patch.object(
+            create.subprocess,
+            "Popen",
+            return_value=SimpleNamespace(pid=43210),
+        ) as popen:
+            launched = create.launch_queue_worker(self.parent)
+
+        self.assertTrue(launched["detached"])
+        self.assertEqual(launched["pid"], 43210)
+        kwargs = popen.call_args.kwargs
+        self.assertTrue(kwargs["start_new_session"])
+        self.assertTrue((self.parent / "creation-worker.log").is_file())
+
+    def test_queue_stops_immediately_on_forbidden_github_identity(self):
+        queue = {
+            "schema_version": create.QUEUE_SCHEMA_VERSION,
+            "status": "queued",
+            "source_repo": "fixture",
+            "base_commit": self.commit,
+            "parent": str(self.parent),
+            "source": str(self.source),
+            "topic_map": str(self.parent / "repo-topic-map.json"),
+            "preflight": str(self.parent / "startup-preflight.json"),
+            "snapshot_manifest": "",
+            "owner": "fengyin-solo",
+            "start_index": 1,
+            "visibility": "public",
+            "worker": {},
+            "final_verification": {},
+            "tasks": [
+                {
+                    "folder": "task-01",
+                    "repo": "fengyin-solo/task-01",
+                    "repo_url": "https://github.com/fengyin-solo/task-01",
+                    "initial_commit": self.commit,
+                    "stage": "pending",
+                    "status": "pending",
+                    "attempts": 0,
+                },
+                {
+                    "folder": "task-02",
+                    "repo": "fengyin-solo/task-02",
+                    "repo_url": "https://github.com/fengyin-solo/task-02",
+                    "initial_commit": self.commit,
+                    "stage": "pending",
+                    "status": "pending",
+                    "attempts": 0,
+                },
+            ],
+        }
+        create.save_queue(self.parent, queue)
+        with patch.object(
+            create,
+            "create_batch",
+            side_effect=ValueError("当前活跃 GitHub 账号为 fengyin-solo，禁止开始任务"),
+        ) as build:
+            result = create.run_queue_worker(self.parent)
+
+        self.assertEqual(build.call_count, 1)
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertEqual(result["tasks"][0]["status"], "failed")
+        self.assertEqual(result["tasks"][1]["status"], "pending")
+
+    def test_queue_retry_backoff_and_wait_time_are_bounded(self):
+        self.assertEqual(
+            [create._retry_delay_seconds(attempt) for attempt in range(1, 7)],
+            [60, 120, 240, 480, 900, 900],
+        )
+        retry_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=31)
+        ).astimezone().isoformat(timespec="seconds")
+        with patch.object(create.time, "sleep") as sleep:
+            create._wait_for_retry({"folder": "task-01", "next_retry_at": retry_at})
+        self.assertTrue(sleep.call_args_list)
+        self.assertTrue(all(call.args[0] <= 30 for call in sleep.call_args_list))
+        self.assertLessEqual(sum(call.args[0] for call in sleep.call_args_list), 31)
+
     def test_bugfix_directory_matches_repository_and_start_index_only_affects_workbook(self):
         self.topic["task_plan"][0].update(
             task_type="Bugfix",
@@ -448,7 +562,7 @@ class SingleFlow(unittest.TestCase):
         rows[0]["提示词"] = "真实测试夹具：新增订单导出接口，保留已有订单权限。"
         workbook.write_workbook(self.parent / "tasks.xlsx", rows)
         # Generation quality is covered by corpus/registry suites; isolate the file/reader integration here.
-        metadata = {"common": {"repo_id": "orders-test", "domain": "测试领域", "subdirection": "测试方向",
+        metadata = {"common": {"repo_id": "orders-test", "domain": "数据工程", "subdirection": "其他",
                               "language": "Python", "frameworks": "stdlib", "repro_level": "已容器化，可一键起环境"},
                     "tasks": {task.name: {"requirements": [{"id": "R1", "text": "订单导出", "check": "make test"}],
                        "review_contract": {"version": 1, "business_checks": [], "test_behaviors": [],
@@ -507,6 +621,18 @@ class SingleFlow(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "配比"):
             validate_plan(self.topic)
 
+    def test_new_batch_must_fill_effective_capacity(self):
+        self.wire_git()
+        self.topic["max_capacity"] = 2
+        self.topic["topics"][0]["seat_capacity"] = 2
+        (self.parent / "repo-topic-map.json").write_text(
+            json.dumps(self.topic, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "有效容量"):
+            self.build()
+        self.assertFalse(self.remote_repos)
+
     def test_capacity_first_does_not_reduce_new_seats_to_suggested_ratio(self):
         from check_repo_theme import compute_capacity
         topic = {"max_capacity": 50, "topics": [{"id": "orders", "seat_capacity": 3}]}
@@ -518,6 +644,20 @@ class SingleFlow(unittest.TestCase):
         strict = compute_capacity(derived, topic_map=topic, invented_auto=True)
         self.assertEqual(strict["invented_slots"], 1)
         self.assertEqual(strict["capacity"], 4)
+
+    def test_semantic_v2_capacity_is_capped_by_usable_modes(self):
+        from check_repo_theme import compute_capacity
+        topic = {
+            "profile": "gsb-semantic-v2",
+            "max_capacity": 50,
+            "topics": [
+                {"id": f"topic-{index}", "seat_capacity": 3}
+                for index in range(18)
+            ],
+        }
+        capacity = compute_capacity({}, topic_map=topic, invented_auto=True)
+        self.assertEqual(capacity["capacity"], 36)
+        self.assertEqual(capacity["mode_slots"], 36)
 
     def test_ratio_and_small_batch_rounding(self):
         self.assertEqual(list(allocate_counts(20).values()), [6, 6, 6, 1, 1])

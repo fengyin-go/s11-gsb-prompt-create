@@ -30,7 +30,7 @@ HEADERS = [
     "更新时间",
 ]
 DEFAULT_WORKBOOK = "tasks.xlsx"
-# 写入前的闸门：这三道不通过就不许把提示词写进工作簿（除非显式 --allow-gate-failure）
+# 写入前的闸门：任一道不通过就不许把提示词写进工作簿。
 GATE_TAG = "生成规则"
 MANIFEST_FILENAME = "prompt-generation-manifest.json"
 CROSS_PROJECT_CONFIG = "gsb-cross-project.json"
@@ -365,6 +365,13 @@ def run_cross_project_gate(
         ])
     if config.get("workbook"):
         command.extend(["--workbook", str(config["workbook"])])
+    if config.get("cache_dir"):
+        command.extend([
+            "--cache-dir",
+            str(resolve_config_path(str(config["cache_dir"]), config_path.parent)),
+        ])
+    if config.get("cache_enabled") is False:
+        command.append("--no-cache")
 
     timeout_seconds = float(config.get("timeout_seconds") or 300)
     try:
@@ -394,7 +401,14 @@ def run_cross_project_gate(
     return payload
 
 
-def run_cross_project_batch_gate(parent, config_path, config, records):
+def run_cross_project_batch_gate(
+    parent,
+    config_path,
+    config,
+    records,
+    *,
+    raise_on_failure=True,
+):
     import tempfile
     checker=resolve_config_path(config['checker'],config_path.parent)
     registry=resolve_config_path(config['registry'],config_path.parent)
@@ -408,10 +422,13 @@ def run_cross_project_batch_gate(parent, config_path, config, records):
         if config.get('min_peer_batches') is not None:command += ['--min-peer-batches',str(config['min_peer_batches'])]
         if config.get('cross_project_root'):command += ['--cross-project-root',str(resolve_config_path(config['cross_project_root'],config_path.parent))]
         if config.get('workbook'):command += ['--workbook',str(config['workbook'])]
+        if config.get('cache_dir'):command += ['--cache-dir',str(resolve_config_path(config['cache_dir'],config_path.parent))]
+        if config.get('cache_enabled') is False:command += ['--no-cache']
         done=subprocess.run(command,capture_output=True,text=True,timeout=float(config.get('timeout_seconds') or 300))
         try: result=json.loads(done.stdout)
         except ValueError:raise SystemExit('跨项目检查器输出无效：'+done.stderr[-1000:])
-        if done.returncode or not result.get('ok'):raise SystemExit('整批跨项目闸未通过：'+json.dumps(result,ensure_ascii=False))
+        if (done.returncode or not result.get('ok')) and raise_on_failure:
+            raise SystemExit('整批跨项目闸未通过：'+json.dumps(result,ensure_ascii=False))
         return result
 
 
@@ -533,8 +550,8 @@ def run_write_gates(
     任何一道不通过就返回 ok=False，由调用方决定拒写还是显式放行。
 
     `max_per_mode` 不传时沿用 check_repo_theme 的默认口径（现在是 3）。S11 正式批次
-    排除 `代码理解`，按 12 个可用模式 x 3 = 36 条验收；13 类词典 x 3 = 39 只保留为
-    通用脚本的理论席位，不作为 S11 的交付目标。
+    排除 `代码理解`，题位数由仓库有效容量决定，单个模式最多 3 条；36 只是 12 个模式
+    全部铺满时的上限，不是最低交付数量。
 
     `invented_subjects` 是 0-1 功能开发的新主体登记（名字 -> 词表）：任务类型里的「功能开发」
     就是 0-1 功能开发，允许它落在仓库里还不存在的模块上；登记后并入主体词表，
@@ -869,7 +886,6 @@ def update(
     repo: Path | None = None,
     topic_map: str | Path | None = None,
     require_topic_map: bool = False,
-    allow_gate_failure: bool = False,
     skip_version_check: bool = False,
     max_per_mode: int | None = None,
     invented_limit: int | None = None,
@@ -877,8 +893,6 @@ def update(
     subject_words: str | None = None,
     opportunity_map: str | Path | None = None,
 ) -> dict:
-    if allow_gate_failure:
-        raise SystemExit("S11 不允许 --allow-gate-failure 绕过闸门")
     parsed = parse_folder_name(folder, parent)
     if not parsed:
         raise SystemExit(f"Cannot parse folder name: {folder}")
@@ -1030,7 +1044,7 @@ def update(
             topic_map=loaded_topic_map,
         )
         gate["skill"] = skill
-        if not gate["ok"] and not allow_gate_failure:
+        if not gate["ok"]:
             print(json.dumps({
                 "ok": False,
                 "error": "写入前的闸门没有通过，这条提示词没有写进工作簿",
@@ -1041,11 +1055,10 @@ def update(
                 "difficulty": gate.get("difficulty"),
                 "dedup": gate.get("dedup"),
                 "hint": "先按上面的违规项换主体 / 换需求模式 / 调类型配比重写；"
-                        "review_required_labels 里的每条题都要写出与最近邻的差异，写不出就换题。"
-                        "确实要先落表再加 --allow-gate-failure，但被平台判废弃的记录不可返修",
+                        "review_required_labels 里的每条题都要写出与最近邻的差异，写不出就换题",
             }, ensure_ascii=False, indent=2))
             raise SystemExit(1)
-        tag = f"{GATE_TAG}: {gate.get('gate_version')}；闸门: {'ok' if gate['ok'] else '强制放行'}"
+        tag = f"{GATE_TAG}: {gate.get('gate_version')}；闸门: ok"
         row["备注"] = f"{row.get('备注') or ''}；{tag}".strip("；") if row.get("备注") else tag
 
     original_bytes: bytes | None = None
@@ -1238,14 +1251,12 @@ def main() -> None:
     )
     parser.add_argument("--require-topic-map", action="store_true",
                         help="缺少 topic map 时拒绝写表")
-    parser.add_argument("--allow-gate-failure", action="store_true",
-                        help="闸门不通过也强行写表（默认拒写；被平台判废弃的记录不可返修，慎用）")
     parser.add_argument("--skip-version-check", action="store_true",
                         help="跳过「skill 是否落后于远端」的检查")
     parser.add_argument(
         "--max-per-mode", type=int, default=None,
         help="同一个需求模式在一批里最多出几条；不传沿用 check_repo_theme 的默认口径（3）。"
-             "S11 正式口径为 12 个可用模式（排除代码理解）x 3 = 36 条。")
+             "S11 按仓库有效容量出题，12 个可用模式全部铺满时上限为 36 条。")
     parser.add_argument(
         "--subject",
         help="0-1 功能开发的新主体名（任务类型必须是「功能开发」）：题面落在一个仓库里还不存在的"
@@ -1287,7 +1298,6 @@ def main() -> None:
             repo=Path(args.repo).expanduser().resolve() if args.repo else None,
             topic_map=args.topic_map,
             require_topic_map=args.require_topic_map,
-            allow_gate_failure=args.allow_gate_failure,
             skip_version_check=args.skip_version_check,
             max_per_mode=args.max_per_mode,
             invented_limit=args.invented_codegen_limit,

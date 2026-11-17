@@ -10,11 +10,10 @@ import sys
 from pathlib import Path
 
 import batch_prompt_workbook as workbook
-import check_prompt_type_intent
 import check_prompt_opportunities
 import domain_fit
-import difficulty_contract
 import prompt_style
+import platform_contract
 import review_contract
 from create_batch_tasks import MANIFEST, git, read_json, save_json, verify_task
 import github_helpers as hub
@@ -41,16 +40,6 @@ def validate_generation(parent, rows, origin, metadata=None):
         raise ValueError("题面表达闸门未通过：" + "；".join(style_errors))
     topic_map = load_topic_map(parent=parent, repo=origin, required=True,
                                expected_base_commit=git(origin, "rev-parse", "HEAD"))
-    type_intent_errors = check_prompt_type_intent.prompt_errors(rows, topic_map)
-    if type_intent_errors:
-        raise ValueError("任务类型语义闸门未通过：" + "；".join(type_intent_errors))
-    domain_errors = domain_fit.map_errors(topic_map, origin)
-    domain_errors += domain_fit.prompt_errors(rows, topic_map)
-    if domain_errors:
-        raise ValueError("领域相关性闸门未通过：" + "；".join(domain_errors))
-    difficulty_errors = difficulty_contract.prompt_errors(rows, topic_map, origin)
-    if difficulty_errors:
-        raise ValueError("困难设计契约未通过：" + "；".join(difficulty_errors))
     review_errors = review_contract.errors(rows, metadata or {})
     if review_errors:
         raise ValueError("验收反馈契约未通过：" + "；".join(review_errors))
@@ -125,6 +114,8 @@ def validate_prompt_opportunity(parent, origin, topic_map_path):
         "source_commit": checked["source_commit"],
         "source_base_commit": checked.get("source_base_commit"),
         "repo_topic_map_sha256": checked.get("repo_topic_map_sha256"),
+        "target_count": checked.get("target_count"),
+        "selection_policy": checked.get("selection_policy"),
         "selected_count": checked.get("selected_count"),
         "reserve_count": checked.get("reserve_count"),
         "mode_counts": checked.get("mode_counts"),
@@ -153,6 +144,9 @@ def prepare(root, batch, metadata_file):
     topic_map = load_topic_map(parent=parent, repo=parent / entries[0]["task_id"] / "origin", required=True)
     topic_policy = topic_map.get("type_policy", "capacity-first")
     validate_type_counts(counts, len(rows), policy=topic_policy)
+    platform_errors, meta = platform_contract.validate(meta, by_name, topic_map, cfg)
+    if platform_errors:
+        raise ValueError("平台字段生成校验未通过：" + "；".join(platform_errors))
     first_origin = parent / entries[0]["task_id"] / "origin"
     validate_generation(parent, rows, first_origin, meta)
     opportunity_binding = validate_prompt_opportunity(parent, first_origin, parent / "repo-topic-map.json")
@@ -219,7 +213,10 @@ def prepare(root, batch, metadata_file):
             json.dumps(review_contract_doc, ensure_ascii=False, sort_keys=True,
                        separators=(",", ":")).encode("utf-8")
         ).hexdigest()
-        record = {k: data[k] for k in ("repo_id", "domain", "subdirection", "language", "frameworks", "repro_level", "requirements")}
+        record = {k: data[k] for k in (
+            "repo_id", "domain", "subdirection", "language", "frameworks",
+            "repro_level", "repro_evidence", "requirements",
+        )}
         record.update(common_profile={"path":str(profile_path.relative_to(root)),"sha256":__import__("hashlib").sha256(profile_path.read_bytes()).hexdigest()}, task_id=name, batch=batch, task_type=entry["task_type"], prompt=prompt,
                       difficulty=data.get("difficulty", "困难"), initial_commit=initial, base_commit=initial,
                       task_repo=entry["repo"].split("/", 1)[1], task_repo_full=entry["repo"],
@@ -231,8 +228,11 @@ def prepare(root, batch, metadata_file):
                       review_contract_sha256=review_contract_hash)
         for key in ("image", "image_id", "harness", "harness_version", "os"):
             record[key] = cfg[key]
-        baseline = {k: record[k] for k in ("repo_id", "domain", "subdirection", "language", "frameworks", "repro_level",
-                                          "image", "image_id", "harness", "harness_version", "os")}
+        baseline = {k: record[k] for k in (
+            "repo_id", "domain", "subdirection", "language", "frameworks",
+            "repro_level", "repro_evidence", "image", "image_id", "harness",
+            "harness_version", "os",
+        )}
         baseline.update(commit=initial, tree=git(target / "origin", "rev-parse", "HEAD^{tree}"))
         record.update(baseline=baseline, baseline_id=lib.content_hash(baseline))
         record["publish"] = {"state": "published", "repo_url": entry["repo_url"],

@@ -20,8 +20,10 @@ if str(SCRIPT_DIR) not in sys.path:
 import check_repo_theme
 
 VERSION = 1
-TARGET_COUNT = 36
 RESERVE_PER_MODE = 1
+LEGACY_TARGET_COUNT = 36
+LEGACY_SELECTION_POLICY = "12-modes-x3-plus-one-reserve-per-mode"
+CAPACITY_SELECTION_POLICY = "capacity-balanced-up-to-three-per-mode"
 FORBIDDEN_PROMPT_FIELDS = {"prompt", "final_prompt", "prompt_txt", "prompt_text"}
 
 
@@ -37,6 +39,19 @@ def _text_list(value: Any) -> list[str]:
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def expected_mode_counts(total: int, modes: list[str]) -> dict[str, int]:
+    """Spread the available plan over usable modes, never above three per mode."""
+    if total < 1:
+        raise ValueError("正式机会数量必须大于 0")
+    if total > len(modes) * 3:
+        raise ValueError(f"正式机会数量 {total} 超过 {len(modes)} 个模式、每模式 3 条的上限")
+    base, extra = divmod(total, len(modes))
+    return {
+        mode: base + (1 if index < extra else 0)
+        for index, mode in enumerate(modes)
+    }
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -182,12 +197,37 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
         errors.append("repo_topic_map_sha256 与当前 topic map 不一致")
     if payload.get("schema_version") != VERSION:
         errors.append(f"schema_version 必须为 {VERSION}")
-    if int(payload.get("target_count") or 0) != TARGET_COUNT:
-        errors.append(f"target_count 必须为 {TARGET_COUNT}")
-    if int(payload.get("selected_count") or 0) != TARGET_COUNT:
-        errors.append(f"selected_count 必须为 {TARGET_COUNT}")
-    if payload.get("selection_policy") != "12-modes-x3-plus-one-reserve-per-mode":
-        errors.append("selection_policy 与正式 36+12 口径不一致")
+
+    raw_plans = [
+        plan for plan in topic_map.get("task_plan", [])
+        if isinstance(plan, dict)
+    ]
+    plans = {
+        int(plan["sequence"]): plan
+        for plan in raw_plans
+        if str(plan.get("sequence")).isdigit()
+    }
+    if len(plans) != len(raw_plans):
+        errors.append("task_plan 的 sequence 必须为唯一正整数")
+    target_count = len(plans)
+    if target_count < 1:
+        errors.append("topic map 的 task_plan 不能为空")
+    if int(payload.get("target_count") or 0) != target_count:
+        errors.append(f"target_count 必须等于 task_plan 数量 {target_count}")
+    if int(payload.get("selected_count") or 0) != target_count:
+        errors.append(f"selected_count 必须等于 task_plan 数量 {target_count}")
+    selection_policy = _text(payload.get("selection_policy"))
+    if selection_policy == LEGACY_SELECTION_POLICY:
+        if target_count != LEGACY_TARGET_COUNT:
+            errors.append(
+                f"旧 selection_policy 仅适用于 {LEGACY_TARGET_COUNT} 条题位；"
+                f"当前 task_plan 为 {target_count} 条，请改用 {CAPACITY_SELECTION_POLICY}"
+            )
+    elif selection_policy != CAPACITY_SELECTION_POLICY:
+        errors.append(
+            f"selection_policy 必须为 {CAPACITY_SELECTION_POLICY}"
+            f" 或兼容旧值 {LEGACY_SELECTION_POLICY}"
+        )
 
     tracked = _git(repo, "ls-files", "--error-unmatch", str(opportunity_path.relative_to(repo))) if opportunity_path.is_relative_to(repo) else None
     if tracked and tracked.returncode == 0:
@@ -198,17 +238,19 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
         return {"ok": False, "version": VERSION, "errors": errors + ["opportunities 必须是数组"]}
     selected = [item for item in opportunities if isinstance(item, dict) and item.get("status") == "selected"]
     reserve = [item for item in opportunities if isinstance(item, dict) and item.get("status") == "reserve"]
-    if len(selected) != TARGET_COUNT:
-        errors.append(f"正式机会必须 {TARGET_COUNT} 条，实际 {len(selected)}")
-    expected_reserve = len(check_repo_theme.USABLE_MODES) * RESERVE_PER_MODE if hasattr(check_repo_theme, "USABLE_MODES") else 12
+    if len(selected) != target_count:
+        errors.append(f"正式机会必须 {target_count} 条，实际 {len(selected)}")
+    usable_modes = list(check_repo_theme.USABLE_MODES)
+    try:
+        expected_modes = expected_mode_counts(target_count, usable_modes)
+    except ValueError as exc:
+        errors.append(str(exc))
+        expected_modes = {mode: 0 for mode in usable_modes}
+    expected_reserve = sum(
+        RESERVE_PER_MODE for count in expected_modes.values() if count > 0
+    )
     if len(reserve) != expected_reserve:
         errors.append(f"备用机会必须 {expected_reserve} 条，实际 {len(reserve)}")
-
-    plans = {
-        int(plan["sequence"]): plan
-        for plan in topic_map.get("task_plan", [])
-        if isinstance(plan, dict) and str(plan.get("sequence")).isdigit()
-    }
     selected_modes: Counter[str] = Counter()
     seen_sequences: set[int] = set()
     seen_opportunity_ids: set[str] = set()
@@ -243,14 +285,16 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
         else:
             selected_modes[mode] += 1
     if seen_sequences != set(plans):
-        errors.append("正式机会 sequence 必须与 topic map 的 36 条题位完全一致")
-    usable_modes = [
-        mode for mode in check_repo_theme.DEMAND_MODE_LEXICON
-        if mode != "代码理解"
-    ]
+        errors.append(
+            f"正式机会 sequence 必须与 topic map 的 {target_count} 条题位完全一致"
+        )
     for mode in usable_modes:
-        if selected_modes.get(mode, 0) != 3:
-            errors.append(f"模式 {mode!r} 必须 3 条，实际 {selected_modes.get(mode, 0)}")
+        expected = expected_modes.get(mode, 0)
+        if selected_modes.get(mode, 0) != expected:
+            errors.append(
+                f"模式 {mode!r} 必须 {expected} 条，"
+                f"实际 {selected_modes.get(mode, 0)}"
+            )
 
     reserve_modes: Counter[str] = Counter()
     for index, item in enumerate(reserve):
@@ -266,8 +310,14 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
         else:
             reserve_modes[mode] += 1
     for mode in usable_modes:
-        if reserve_modes.get(mode, 0) != RESERVE_PER_MODE:
-            errors.append(f"备用模式 {mode!r} 必须 {RESERVE_PER_MODE} 条")
+        expected = (
+            RESERVE_PER_MODE if expected_modes.get(mode, 0) > 0 else 0
+        )
+        if reserve_modes.get(mode, 0) != expected:
+            errors.append(
+                f"备用模式 {mode!r} 必须 {expected} 条，"
+                f"实际 {reserve_modes.get(mode, 0)}"
+            )
     if payload.get("selected_count") != len(selected):
         errors.append("selected_count 与 opportunities 中的正式卡数量不一致")
     if payload.get("reserve_count") != len(reserve):
@@ -287,6 +337,8 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
         "repo_topic_map_sha256": _sha(map_path),
         "source_commit": head.stdout.strip(),
         "source_base_commit": topic_map.get("base_commit"),
+        "target_count": target_count,
+        "selection_policy": selection_policy,
         "selected_count": len(selected),
         "reserve_count": len(reserve),
         "mode_counts": dict(selected_modes),

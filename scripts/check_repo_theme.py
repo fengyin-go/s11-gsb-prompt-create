@@ -108,15 +108,15 @@ DEFAULT_MAX_PER_SUBJECT = int(os.environ.get("SOLO_CREATE_MAX_PER_SUBJECT", "2")
 # （1.1%/对）；放开到每模式 2 条，一批 22 条也只有 9 对同模式对，预期废弃约 0.1 条。
 #
 # 2026-09-22 由 2 放到 3。通用脚本保留 13 类模式词典用于历史兼容，
-# 13 × 3 = 39 只是理论席位；S11 正式容量与机会地图会排除「代码理解」，
-# 按 12 × 3 = 36 条验收。
+# 13 × 3 = 39 只是理论席位；S11 正式容量与机会地图排除「代码理解」，
+# 12 × 3 = 36 是容量上限，不是固定交付数量。
 # 代价有界：判废召回是按「对级特征」（同主体 / 同需求模式有交集）算的，与这个上限无关；
 # 把历史两批（cc-6600009 48 条、cc-6600011 49 条）按 3 重跑仍然被判不通过，对级召回一点没掉。
 # 同模式对从 12 对涨到最多 36 对，按 1.1%/对估算预期多废弃约 0.2 条。
 #
 # 产能 = min(单仓库上限, 主体数 × 每主体上限, 模式数 × 每模式上限)：
-# 通用公式仍是 min(单仓上限, 主体×每主体, 模式×每模式)；S11 建仓 skill 另把单仓和
-# 正式目标都压到 36，并要求 12 个可用模式各 3 条。
+# 通用公式仍是 min(单仓上限, 主体×每主体, 模式×每模式)；S11 另外排除「代码理解」，
+# 以 12 个可用模式、每模式 3 条作为容量上限。
 DEFAULT_MAX_PER_MODE = 3
 # 任务家族：同主体两条必须跨家族。依据是判废对里跨「新增能力类 ↔ Bugfix」的组合 0/38。
 TASK_FAMILY = {
@@ -493,6 +493,9 @@ DEMAND_MODE_LEXICON: dict[str, tuple[str, ...]] = {
     "依赖升级与迁移与流程": ("构建", "上线", "流水线", "依赖", "环境", "数据库", "示例数据", "部署", "本地开发"),
     "代码理解": ("读懂", "理清", "梳理", "分步说明", "流程图", "链路", "经过哪些环节"),
 }
+USABLE_MODES = tuple(
+    mode for mode in DEMAND_MODE_LEXICON if mode != "代码理解"
+)
 
 
 def _score(text: str, keys: tuple[str, ...]) -> int:
@@ -798,7 +801,9 @@ def compute_capacity(
     subjects = sorted((derived or {}).keys())
     subject_slots = len(subjects) * max_per_subject
     semantic_topic_slots = topic_slots(topic_map)
-    mode_slots = len(DEMAND_MODE_LEXICON) * max_per_mode
+    profile = str((topic_map or {}).get("profile") or "")
+    usable_modes = USABLE_MODES if profile == "gsb-semantic-v2" else tuple(DEMAND_MODE_LEXICON)
+    mode_slots = len(usable_modes) * max_per_mode
     profile_cap = int((topic_map or {}).get("max_capacity") or max_per_repo)
     base_seat_slots = semantic_topic_slots if topic_map else subject_slots
     base_capacity = min(max_per_repo, base_seat_slots, mode_slots, profile_cap)
@@ -815,7 +820,8 @@ def compute_capacity(
     invented_slots = min(invented_ceiling, invented_ratio_bound)
     subject_total_slots = subject_slots + invented_slots
     seat_total_slots = semantic_topic_slots + invented_slots if topic_map else subject_total_slots
-    profile_total_cap = profile_cap + invented_slots if topic_map else max_per_repo
+    # topic map 的 max_capacity is an absolute profile cap, including any invented seats.
+    profile_total_cap = profile_cap if topic_map else max_per_repo
     capacity = min(max_per_repo, seat_total_slots, mode_slots, profile_total_cap)
     binding = "repo"
     if topic_map and semantic_topic_slots <= min(max_per_repo, mode_slots, profile_cap):

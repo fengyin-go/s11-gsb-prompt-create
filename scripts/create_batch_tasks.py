@@ -2,12 +2,17 @@
 """One prompt, one repository, one main branch, origin + workspace."""
 from __future__ import annotations
 import argparse
+import contextlib
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterator
 
 import batch_prompt_workbook as workbook
 import domain_fit
@@ -21,6 +26,8 @@ from s11_policy import TYPE_WEIGHTS, validate_plan
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 MANIFEST = "s11-task-repos.json"
+QUEUE_FILE = "creation-queue.json"
+QUEUE_SCHEMA_VERSION = 1
 REPO_SUFFIX_BY_SLUG = {
     "development": "development",
     "bugfix": "bugfix",
@@ -40,6 +47,166 @@ def save_json(path, value):
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temp.replace(path)
+
+
+def now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+@contextlib.contextmanager
+def exclusive_file_lock(path, *, wait_seconds=0.0) -> Iterator[Path]:
+    try:
+        import fcntl
+    except ImportError as exc:  # pragma: no cover - macOS/Linux workspace.
+        raise RuntimeError("当前平台没有 fcntl，无法保证建仓队列单 worker") from exc
+
+    lock_path = Path(path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    deadline = time.monotonic() + max(0.0, float(wait_seconds))
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ValueError(f"建仓队列已有 worker 在运行：{lock_path}")
+                time.sleep(0.1)
+        yield lock_path
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def queue_path(parent):
+    return Path(parent).resolve() / QUEUE_FILE
+
+
+def load_queue(parent):
+    path = queue_path(parent)
+    if not path.is_file():
+        raise ValueError(f"建仓队列不存在：{path}")
+    payload = read_json(path)
+    if (
+        not isinstance(payload, dict)
+        or int(payload.get("schema_version") or 0) != QUEUE_SCHEMA_VERSION
+        or not isinstance(payload.get("tasks"), list)
+    ):
+        raise ValueError(f"建仓队列格式不受支持：{path}")
+    return payload
+
+
+def save_queue(parent, payload):
+    payload["updated_at"] = now_iso()
+    save_json(queue_path(parent), payload)
+
+
+def _queue_summary(parent, queue):
+    counts = {}
+    for item in queue.get("tasks", []):
+        status = str(item.get("status") or "pending")
+        counts[status] = counts.get(status, 0) + 1
+    return {
+        "ok": queue.get("status") not in {"needs_attention", "failed"},
+        "queue": str(queue_path(parent)),
+        "status": queue.get("status"),
+        "source_repo": queue.get("source_repo"),
+        "base_commit": queue.get("base_commit"),
+        "task_count": len(queue.get("tasks", [])),
+        "status_counts": counts,
+        "updated_at": queue.get("updated_at"),
+        "worker": queue.get("worker") or {},
+        "tasks": queue.get("tasks", []),
+    }
+
+
+def _retryable_queue_error(message):
+    lowered = str(message or "").lower()
+    return any(marker in lowered for marker in (
+        "rate limit",
+        "secondary rate",
+        "http 429",
+        "too many requests",
+        "too many repositories",
+        "too quickly",
+        "限流",
+        "等待预算",
+        "timeout",
+        "timed out",
+        "connection reset",
+        "tls handshake",
+        "network is unreachable",
+        "temporary failure",
+    ))
+
+
+def _fatal_queue_error(message):
+    lowered = str(message or "").lower()
+    return any(marker in lowered for marker in (
+        "fengyin-solo",
+        "禁止开始",
+        "立即停止",
+        "当前活跃 github 账号",
+        "无法确认本机当前活跃 github 账号",
+        "active github account",
+        "bad credentials",
+        "authentication failed",
+        "requires authentication",
+        "http 401",
+        "http 403",
+        "forbidden",
+        "未授权",
+        "认证失败",
+    ))
+
+
+def _retry_delay_seconds(attempts):
+    """Queue-level backoff after a retryable failure escapes the GitHub helper."""
+    return min(60 * 2 ** min(max(int(attempts) - 1, 0), 4), 900)
+
+
+def _wait_for_retry(item):
+    raw = str(item.get("next_retry_at") or "").strip()
+    if not raw:
+        return
+    try:
+        retry_at = datetime.fromisoformat(raw)
+    except ValueError:
+        return
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc).astimezone()
+    remaining = (retry_at - datetime.now(timezone.utc).astimezone()).total_seconds()
+    if remaining <= 0:
+        return
+    folder = str(item.get("folder") or "unknown")
+    print(
+        f"{folder}：等待重试时间，剩余 {int(remaining)} 秒",
+        file=sys.stderr,
+        flush=True,
+    )
+    while remaining > 0:
+        step = min(remaining, 30)
+        time.sleep(step)
+        remaining -= step
+
+
+def _queue_call_args(queue, **overrides):
+    values = {
+        "parent": queue["parent"],
+        "source": queue["source"],
+        "topic_path": queue["topic_map"],
+        "preflight": queue["preflight"],
+        "owner": queue.get("owner"),
+        "dry_run": False,
+        "verify": False,
+        "start_index": int(queue.get("start_index") or 1),
+        "visibility": str(queue.get("visibility") or "public"),
+        "snapshot_manifest": queue.get("snapshot_manifest"),
+    }
+    values.update(overrides)
+    return values
 
 
 def git(repo, *args):
@@ -143,7 +310,8 @@ def validate_preflight(path, source, commit, snapshot=None):
 
 
 def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_run=False,
-                 verify=False, start_index=1, visibility="public", snapshot_manifest=None):
+                 verify=False, start_index=1, visibility="public", snapshot_manifest=None,
+                 only_folders=None, write_batch_outputs=True, plan_only=False):
     source, parent = Path(source).resolve(), Path(parent).resolve()
     snapshot = (
         source_snapshot.validate_snapshot(source, snapshot_manifest)
@@ -190,6 +358,11 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
                 raise ValueError("最终基准提交没有出现在原始仓库远端分支")
     old = read_json(parent / MANIFEST) if (parent / MANIFEST).is_file() else {"tasks": []}
     known = {item["folder"]: item for item in old["tasks"]}
+    if not known and len(topic_map["task_plan"]) != int(capacity["capacity"]):
+        raise ValueError(
+            "新批次必须按当前有效容量生成题位："
+            f"capacity={capacity['capacity']}，task_plan={len(topic_map['task_plan'])}"
+        )
     # A batch started before directory naming changed must retain every frozen ID.
     legacy = bool(known) and all(re.fullmatch(r"s11-\d{6}", name) for name in known)
     def folder_for(item):
@@ -216,6 +389,7 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             "snapshot_file_count": snapshot["file_count"],
         })
     tasks, failed, created, skipped = [], [], [], []
+    selected_folders = set(only_folders) if only_folders is not None else None
     for item in topic_map["task_plan"]:
         number = start_index + item["sequence"] - 1
         if number > 999999:
@@ -231,10 +405,23 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
         if legacy:
             entry.pop("number")
         previous = known.get(folder)
+        if selected_folders is not None and folder not in selected_folders:
+            if previous:
+                entry.update({k: previous[k] for k in ("repo", "repo_url")})
+            tasks.append(entry)
+            continue
         if previous:
             for key in entry:
                 if previous.get(key) != entry[key]:
                     raise ValueError(f"已有任务 {folder} 的 {key} 发生变化；保留旧计划后只向末尾追加")
+        if plan_only:
+            if previous:
+                entry.update({k: previous[k] for k in ("repo", "repo_url")})
+            else:
+                name = task_repo_name(base_repo_name, item["sequence"], item["slug"])
+                entry.update(repo=f"{owner}/{name}", repo_url=f"https://github.com/{owner}/{name}")
+            tasks.append(entry)
+            continue
         if verify:
             if previous is None:
                 failed.append({"folder": folder, "reason": "清单中没有该任务"})
@@ -313,7 +500,7 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
                 })
             created.append(entry)
         tasks.append(entry)
-    if not dry_run and not verify:
+    if not dry_run and not verify and write_batch_outputs:
         rows = workbook.read_workbook(parent / "tasks.xlsx")
         by_name = {row["子文件夹名称"]: row for row in rows}
         if set(by_name) - {t["folder"] for t in tasks}:
@@ -340,30 +527,352 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             "workbook": str(parent / "tasks.xlsx"), "preflight": evidence,
             "source_mode": source_manifest_fields["source_mode"],
             "source_name": base_repo_name,
+            "source_repo": source_reference,
+            "base_commit": commit,
             "next_step": "复制依赖后做无安装启动 smoke；生成提示词；prepare_handoff.py 交接"}
+
+
+def freeze_queue(parent, source, topic_path, *, preflight, owner=None, start_index=1,
+                 visibility="public", snapshot_manifest=None):
+    parent = Path(parent).expanduser().resolve()
+    source = Path(source).expanduser().resolve()
+    topic_path = Path(topic_path).expanduser().resolve()
+    preflight = Path(preflight).expanduser().resolve()
+    snapshot_path = (
+        Path(snapshot_manifest).expanduser().resolve()
+        if snapshot_manifest
+        else None
+    )
+    planned = create_batch(
+        parent,
+        source,
+        topic_path,
+        preflight=preflight,
+        owner=owner,
+        dry_run=True,
+        plan_only=True,
+        start_index=start_index,
+        visibility=visibility,
+        snapshot_manifest=snapshot_path,
+    )
+    if not planned.get("ok"):
+        raise ValueError("无法冻结建仓队列：" + json.dumps(planned, ensure_ascii=False))
+    previous = load_queue(parent) if queue_path(parent).is_file() else {}
+    if previous and (
+        previous.get("source_repo") != planned.get("source_repo")
+        or previous.get("base_commit") != planned.get("base_commit")
+    ):
+        raise ValueError("已有建仓队列不属于当前源码基线；不能覆盖或混用")
+    previous_tasks = {
+        str(item.get("folder") or ""): item
+        for item in previous.get("tasks", [])
+        if isinstance(item, dict)
+    }
+    tasks = []
+    for task in planned.get("tasks", []):
+        folder = str(task["folder"])
+        old = previous_tasks.get(folder, {})
+        if old and (
+            old.get("repo") not in (None, task.get("repo"))
+            or old.get("initial_commit") not in (None, task.get("initial_commit"))
+        ):
+            raise ValueError(f"建仓队列中的 {folder} 与当前冻结计划不一致")
+        tasks.append({
+            "folder": folder,
+            "repo": str(task.get("repo") or ""),
+            "repo_url": str(task.get("repo_url") or ""),
+            "initial_commit": str(task.get("initial_commit") or ""),
+            "stage": str(old.get("stage") or "pending"),
+            "status": str(old.get("status") or "pending"),
+            "attempts": int(old.get("attempts") or 0),
+            "next_retry_at": str(old.get("next_retry_at") or ""),
+            "error": str(old.get("error") or ""),
+            "updated_at": str(old.get("updated_at") or now_iso()),
+        })
+    queue_owner = str(owner or "").strip()
+    if not queue_owner and tasks and tasks[0]["repo"]:
+        queue_owner = tasks[0]["repo"].split("/", 1)[0]
+    queue = {
+        "schema_version": QUEUE_SCHEMA_VERSION,
+        "status": "queued" if any(item["status"] != "verified" for item in tasks) else "complete",
+        "created_at": str(previous.get("created_at") or now_iso()),
+        "updated_at": now_iso(),
+        "source_repo": planned.get("source_repo"),
+        "base_commit": planned.get("base_commit"),
+        "source_mode": planned.get("source_mode"),
+        "parent": str(parent),
+        "source": str(source),
+        "topic_map": str(topic_path),
+        "preflight": str(preflight),
+        "snapshot_manifest": str(snapshot_path) if snapshot_path else "",
+        "owner": queue_owner,
+        "start_index": int(start_index),
+        "visibility": visibility,
+        "worker": previous.get("worker") or {},
+        "final_verification": previous.get("final_verification") or {},
+        "tasks": tasks,
+    }
+    save_queue(parent, queue)
+    return _queue_summary(parent, queue)
+
+
+def queue_status(parent):
+    queue = load_queue(parent)
+    return _queue_summary(parent, queue)
+
+
+def _queue_update_task(parent, folder, **changes):
+    queue = load_queue(parent)
+    for item in queue.get("tasks", []):
+        if item.get("folder") == folder:
+            item.update(changes)
+            item["updated_at"] = now_iso()
+            break
+    else:
+        raise ValueError(f"建仓队列中没有任务：{folder}")
+    save_queue(parent, queue)
+    return queue
+
+
+def run_queue_worker(parent):
+    parent = Path(parent).expanduser().resolve()
+    queue = load_queue(parent)
+    if queue.get("status") == "complete":
+        return _queue_summary(parent, queue)
+    with exclusive_file_lock(parent / ".creation-worker.lock"):
+        queue = load_queue(parent)
+        queue["status"] = "running"
+        queue["worker"] = {
+            "pid": os.getpid(),
+            "started_at": now_iso(),
+        }
+        save_queue(parent, queue)
+        stop_worker = False
+        for item in list(queue.get("tasks", [])):
+            if item.get("status") == "verified":
+                continue
+            if item.get("status") == "retry_wait":
+                _wait_for_retry(item)
+            folder = str(item["folder"])
+            queue = _queue_update_task(
+                parent,
+                folder,
+                status="running",
+                error="",
+                next_retry_at="",
+            )
+            item = next(
+                task for task in queue["tasks"] if task.get("folder") == folder
+            )
+            try:
+                result = create_batch(
+                    **_queue_call_args(
+                        queue,
+                        only_folders={folder},
+                        write_batch_outputs=False,
+                    )
+                )
+                if not result.get("ok"):
+                    raise ValueError(
+                        f"{folder} 建仓任务未完成："
+                        + json.dumps(result, ensure_ascii=False)
+                    )
+                journal_path = parent / "creation-journal.json"
+                journal = read_json(journal_path) if journal_path.is_file() else {}
+                stage = str(
+                    ((journal.get("tasks") or {}).get(folder) or {}).get("stage")
+                    or "verified"
+                )
+                _queue_update_task(
+                    parent,
+                    folder,
+                    status="verified",
+                    stage=stage,
+                    attempts=int(item.get("attempts") or 0) + 1,
+                    error="",
+                    next_retry_at="",
+                )
+            except Exception as exc:  # noqa: BLE001 - preserve every item failure in the queue.
+                message = str(exc)
+                retryable = _retryable_queue_error(message)
+                fatal = _fatal_queue_error(message)
+                attempts = int(item.get("attempts") or 0) + 1
+                retry_at = (
+                    (
+                        datetime.now(timezone.utc)
+                        + timedelta(seconds=_retry_delay_seconds(attempts))
+                    )
+                    .astimezone()
+                    .isoformat(timespec="seconds")
+                    if retryable
+                    else ""
+                )
+                _queue_update_task(
+                    parent,
+                    folder,
+                    status="retry_wait" if retryable else "failed",
+                    attempts=attempts,
+                    error=message,
+                    next_retry_at=retry_at,
+                )
+                if fatal:
+                    stop_worker = True
+            if stop_worker:
+                break
+        queue = load_queue(parent)
+        statuses = {str(item.get("status") or "") for item in queue.get("tasks", [])}
+        if statuses == {"verified"}:
+            try:
+                final = create_batch(
+                    **_queue_call_args(queue, write_batch_outputs=True)
+                )
+                queue["final_verification"] = {
+                    "ok": bool(final.get("ok")),
+                    "completed_at": now_iso(),
+                    "planned_count": final.get("planned_count"),
+                    "failed_count": final.get("failed_count"),
+                }
+                queue["status"] = "complete" if final.get("ok") else "needs_attention"
+            except Exception as exc:  # noqa: BLE001
+                queue["final_verification"] = {
+                    "ok": False,
+                    "completed_at": now_iso(),
+                    "error": str(exc),
+                }
+                queue["status"] = "retry_wait" if _retryable_queue_error(exc) else "needs_attention"
+        elif "retry_wait" in statuses:
+            queue["status"] = "retry_wait"
+        else:
+            queue["status"] = "needs_attention"
+        queue["worker"]["finished_at"] = now_iso()
+        save_queue(parent, queue)
+        return _queue_summary(parent, queue)
+
+
+def launch_queue_worker(parent):
+    parent = Path(parent).expanduser().resolve()
+    queue = load_queue(parent)
+    if queue.get("status") == "complete":
+        return {
+            "ok": True,
+            "detached": False,
+            "status": "complete",
+            "queue": _queue_summary(parent, queue),
+        }
+    log_path = parent / "creation-worker.log"
+    with log_path.open("ab") as log:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--parent",
+                str(parent),
+                "--worker",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    queue = load_queue(parent)
+    queue["worker"] = {
+        "pid": process.pid,
+        "started_at": now_iso(),
+        "log": str(log_path),
+    }
+    save_queue(parent, queue)
+    return {
+        "ok": True,
+        "detached": True,
+        "pid": process.pid,
+        "log": str(log_path),
+        "queue": _queue_summary(parent, queue),
+    }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parent", required=True, help="<root>/batches/<batch>")
-    parser.add_argument("--source", required=True)
+    parser.add_argument("--source")
     parser.add_argument(
         "--snapshot-manifest",
         help="本地目录快照清单；提供后跳过原仓库 origin 远端与 baseline_push_ok 要求",
     )
-    parser.add_argument("--topic-map", required=True)
+    parser.add_argument("--topic-map")
     parser.add_argument("--preflight")
     parser.add_argument("--owner")
     parser.add_argument("--visibility", choices=["public", "private", "internal"], default="public")
     parser.add_argument("--start-index", type=int, default=1)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument(
+        "--queue",
+        action="store_true",
+        help="冻结完整建仓计划到 creation-queue.json，不在前台逐个建仓",
+    )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="与 --queue/--resume 搭配，启动独立后台 worker 并立即返回状态",
+    )
+    parser.add_argument(
+        "--worker",
+        action="store_true",
+        help="内部模式：前台消费已冻结的建仓队列",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="从 creation-queue.json 恢复未完成建仓",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="只读输出建仓队列状态",
+    )
     args = parser.parse_args()
     try:
-        result = create_batch(args.parent, args.source, args.topic_map, preflight=args.preflight,
-                              owner=args.owner, dry_run=args.dry_run, verify=args.verify,
-                              start_index=args.start_index, visibility=args.visibility,
-                              snapshot_manifest=args.snapshot_manifest)
+        if args.status:
+            result = queue_status(args.parent)
+        elif args.worker or args.resume:
+            result = (
+                launch_queue_worker(args.parent)
+                if args.detach
+                else run_queue_worker(args.parent)
+            )
+        else:
+            if not args.source or not args.topic_map:
+                raise ValueError("同步建仓或冻结队列需要 --source 和 --topic-map")
+            if args.queue:
+                if args.verify:
+                    raise ValueError("--queue 不能与 --verify 混用")
+                if args.dry_run and args.detach:
+                    raise ValueError("--dry-run 不能启动后台 worker")
+                result = freeze_queue(
+                    args.parent,
+                    args.source,
+                    args.topic_map,
+                    preflight=args.preflight,
+                    owner=args.owner,
+                    start_index=args.start_index,
+                    visibility=args.visibility,
+                    snapshot_manifest=args.snapshot_manifest,
+                )
+                if args.detach:
+                    result = launch_queue_worker(args.parent)
+            else:
+                result = create_batch(
+                    args.parent,
+                    args.source,
+                    args.topic_map,
+                    preflight=args.preflight,
+                    owner=args.owner,
+                    dry_run=args.dry_run,
+                    verify=args.verify,
+                    start_index=args.start_index,
+                    visibility=args.visibility,
+                    snapshot_manifest=args.snapshot_manifest,
+                )
     except (ValueError, OSError, RuntimeError) as exc:
         result = {"ok": False, "blocking_reason": str(exc)}
     print(json.dumps(result, ensure_ascii=False, indent=2))
