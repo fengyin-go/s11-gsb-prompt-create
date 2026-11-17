@@ -138,6 +138,37 @@ def test_scaffolding_words_are_not_whitelisted() -> None:
     assert result["longest_common_fragment_length"] >= 20
 
 
+def test_b1115_optimization_tail_is_blocked() -> None:
+    shared = (
+        "按现有处理链路修正受影响字段，沿用既有字段，"
+        "竞态请求只允许一项生效。验收样例："
+    )
+    left = "优化现有流数据源批量暂停。失败分区保留可续位置。" + shared + "STRE-0001。"
+    right = "优化现有指标采集器批量暂停。失败采集器保留续做位置。" + shared + "METR-0001。"
+
+    result = dedup.check_raw_a5(left, right)
+
+    assert result["ok"] is False
+    assert result["longest_common_fragment_length"] >= 20
+    assert "raw_a5_common_fragment" in {
+        violation["kind"] for violation in result["violations"]
+    }
+
+
+def test_b1115_bugfix_tail_is_blocked() -> None:
+    shared = (
+        "顺着当前取数链路改正异常版本，沿用历史快照，"
+        "并发处理只接受一个终态。验收样例："
+    )
+    left = "输出配置关闭后状态回退，写入参数丢失。" + shared + "SINK-0002。"
+    right = "日志归档游标迁移后重复读取，断点错位。" + shared + "LOG-0002。"
+
+    result = dedup.check_raw_a5(left, right)
+
+    assert result["ok"] is False
+    assert result["longest_common_fragment_length"] >= 20
+
+
 def test_ordinary_domain_terms_without_long_fragment_pass() -> None:
     left = "采购单审核页面需要显示供应商名称、采购单编号和入库仓库。"
     right = "供应商名称用于收货核对，仓库人员负责采购单审核。"

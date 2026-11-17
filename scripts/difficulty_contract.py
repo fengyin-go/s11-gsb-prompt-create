@@ -26,6 +26,7 @@ the implementer to choose.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import re
 import sys
@@ -38,6 +39,10 @@ if str(SCRIPT_DIR) not in sys.path:
 
 
 CONTRACT_VERSION = 3
+WORKLOAD_CONTRACT_VERSION = 1
+MIN_EXPECTED_EFFECTIVE_TOOL_CALLS = 55
+MIN_WORKLOAD_SLICES = 4
+MIN_VERIFICATION_PATHS = 2
 FOLDER_PLAN_RE = re.compile(
     r"-(0[1-9]|[1-9][0-9])-(development|bugfix|optimization|refactor|migration)$"
 )
@@ -95,6 +100,8 @@ H3_FALSE_GUARDS = {
     "retry_or_error_message_only",
     "display_only",
     "single_result_invariant_only",
+    "source_selection_only",
+    "equivalent_user_outcome",
 }
 CONTEXT_ANCHOR_SUPPORTS = {"trigger", "option_a", "option_b", "invariant"}
 OPEN_CHOICE_RE = re.compile(
@@ -207,6 +214,45 @@ def _sentences(text: str) -> list[str]:
 def _cjk_trigrams(text: str) -> set[str]:
     compact = re.sub(r"[^\u4e00-\u9fff]", "", text)
     return {compact[index:index + 3] for index in range(max(0, len(compact) - 2))}
+
+
+def _longest_common_cjk(left: str, right: str) -> str:
+    left_text = re.sub(r"[^\u4e00-\u9fff]", "", left or "")
+    right_text = re.sub(r"[^\u4e00-\u9fff]", "", right or "")
+    if not left_text or not right_text:
+        return ""
+    previous = [0] * (len(right_text) + 1)
+    best_end = 0
+    best_length = 0
+    for left_index, left_char in enumerate(left_text, start=1):
+        current = [0] * (len(right_text) + 1)
+        for right_index, right_char in enumerate(right_text, start=1):
+            if left_char != right_char:
+                continue
+            current[right_index] = previous[right_index - 1] + 1
+            if current[right_index] > best_length:
+                best_length = current[right_index]
+                best_end = left_index
+        previous = current
+    return left_text[best_end - best_length:best_end]
+
+
+def _trigram_similarity(left: str, right: str) -> float:
+    left_grams = _cjk_trigrams(left)
+    right_grams = _cjk_trigrams(right)
+    if not left_grams or not right_grams:
+        return 0.0
+    return len(left_grams & right_grams) / len(left_grams | right_grams)
+
+
+def _equivalent_option_outcome(left: str, right: str) -> tuple[bool, str]:
+    """Detect two H3 options that only rename the source or mechanism."""
+    common = _longest_common_cjk(left, right)
+    similarity = _trigram_similarity(left, right)
+    return (
+        len(common) >= 16 or similarity >= 0.72,
+        common or f"相似度 {similarity:.2f}",
+    )
 
 
 def _tradeoff_conflict_errors(prompt: str, excerpt: str) -> list[str]:
@@ -378,6 +424,80 @@ def _design_errors(
     if len(_text(integration.get("prompt_excerpt"))) < 8:
         errors.append(f"{where} 的 module_integration.prompt_excerpt 缺失")
 
+    workload = design.get("workload_design")
+    if not isinstance(workload, dict):
+        errors.append(f"{where} 缺少 workload_design；P6 低调用量题不能进入正式交接")
+        workload = {}
+    if workload.get("version") != WORKLOAD_CONTRACT_VERSION:
+        errors.append(
+            f"{where} 的 workload_design.version 必须是 {WORKLOAD_CONTRACT_VERSION}"
+        )
+    expected_calls = workload.get("expected_effective_tool_calls")
+    if (
+        type(expected_calls) is not int
+        or expected_calls < MIN_EXPECTED_EFFECTIVE_TOOL_CALLS
+    ):
+        errors.append(
+            f"{where} 的 workload_design.expected_effective_tool_calls "
+            f"必须为不小于 {MIN_EXPECTED_EFFECTIVE_TOOL_CALLS} 的整数"
+        )
+    if len(_text(workload.get("call_floor_rationale"))) < 12:
+        errors.append(
+            f"{where} 的 workload_design.call_floor_rationale "
+            "必须说明为什么至少需要这些工具调用，不能只填数字"
+        )
+    slices = workload.get("work_slices")
+    if not isinstance(slices, list) or len(slices) < MIN_WORKLOAD_SLICES:
+        errors.append(
+            f"{where} 的 workload_design.work_slices "
+            f"至少要有 {MIN_WORKLOAD_SLICES} 个工作切片"
+        )
+        slices = []
+    slice_modules: set[str] = set()
+    slice_results: set[str] = set()
+    slice_verifications: set[str] = set()
+    for index, item in enumerate(slices):
+        label = f"{where} workload_design.work_slices[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{label} 必须是对象")
+            continue
+        module = _text(item.get("module"))
+        data_result = _text(item.get("data_result"))
+        verification = _text(item.get("verification"))
+        if len(module) < 2:
+            errors.append(f"{label}.module 缺失")
+        for key, value in (
+            ("implementation", _text(item.get("implementation"))),
+            ("data_result", data_result),
+            ("verification", verification),
+        ):
+            if len(value) < 8:
+                errors.append(f"{label}.{key} 至少要有 8 个字符")
+        if module:
+            slice_modules.add(module)
+        if data_result:
+            slice_results.add(data_result)
+        if verification:
+            slice_verifications.add(verification)
+    if len(slice_modules) < 2:
+        errors.append(f"{where} 的 workload_design.work_slices 必须覆盖至少两个模块")
+    if len(slice_results) < len(slices):
+        errors.append(f"{where} 的 workload_design.work_slices 必须产生不同的数据结果")
+    if len(slice_verifications) < len(slices):
+        errors.append(f"{where} 的 workload_design.work_slices 必须分别写独立验证")
+    verification_paths = _text_list(workload.get("verification_paths"))
+    if len(set(verification_paths)) < MIN_VERIFICATION_PATHS:
+        errors.append(
+            f"{where} 的 workload_design.verification_paths "
+            f"至少要有 {MIN_VERIFICATION_PATHS} 条不同的真实验证路径"
+        )
+    for index, path in enumerate(verification_paths):
+        if len(path) < 8:
+            errors.append(
+                f"{where} workload_design.verification_paths[{index}] "
+                "至少要有 8 个字符"
+            )
+
     tradeoff = design.get("design_tradeoff")
     if not isinstance(tradeoff, dict):
         errors.append(f"{where} 缺少 design_tradeoff")
@@ -486,6 +606,28 @@ def _design_errors(
         errors.append(f"{where} 的每个 H3 方案必须产生不同的正确性影响")
     if len(set(observable_results)) < len(options):
         errors.append(f"{where} 的每个 H3 方案必须有不同的可观察结果")
+    for left, right in itertools.combinations(analysis, 2):
+        if not isinstance(left, dict) or not isinstance(right, dict):
+            continue
+        left_option = _text(left.get("option"))
+        right_option = _text(right.get("option"))
+        left_effect = _text(left.get("correctness_effect"))
+        right_effect = _text(right.get("correctness_effect"))
+        left_result = _text(left.get("observable_result"))
+        right_result = _text(right.get("observable_result"))
+        effect_same, effect_evidence = _equivalent_option_outcome(
+            left_effect, right_effect
+        )
+        result_same, result_evidence = _equivalent_option_outcome(
+            left_result, right_result
+        )
+        if effect_same or result_same:
+            evidence = effect_evidence if effect_same else result_evidence
+            errors.append(
+                f"{where} 的 H3 方案「{left_option}」与「{right_option}」"
+                f"只是来源或机制不同，正确性影响/用户结果近似相同（{evidence}）；"
+                "两方案必须改变不同的数据状态、版本边界或下游产物"
+            )
     for key in (
         "both_options_valid",
         "choice_changes_correctness",

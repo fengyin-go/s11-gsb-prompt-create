@@ -45,11 +45,35 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
 - `both_options_valid`、`choice_changes_correctness`、`prompt_keeps_choice_open`、`fixed_branch_excluded`；
 - `option_analysis[].preserves_constraint_ids`：两种方案都必须覆盖全部 H1 约束编号；
 - `option_analysis[].correctness_effect` 和 `observable_result`：两种方案分别改变什么、用户分别看到什么；
-- `false_h3_guards`：显式排除“一个方案违反约束”“题面提前裁决”“只是实现重构”“只是重试/报错提示”“只是展示变化”“只有一个结果不变量”六类假 H3；
+- `false_h3_guards`：显式排除“一个方案违反约束”“题面提前裁决”“只是实现重构”“只是重试/报错提示”“只是展示变化”“只有一个结果不变量”“只是更换来源”“用户结果等同”八类假 H3；
 - `context_anchors` 至少两条，一条 `supports=trigger`，另一条支撑 `option_a` 或 `option_b`。
 
 题面只需要承载“冲突发生的业务事实”和“两种方案共同必须守住的结果边界”，不应把内部方案
 逐条写在文末。`false_h3_counterexample` 必须记录本题最容易伪装成 H3 的固定裁决句。
+
+### 2026-11-17 全批回流：12 条 H3 失败
+
+`dfzr10012 / b1115-01` 的 39 条最终回执中，12 条丢弃题全部是 H1/H2 成立、H3 不成立。
+逐题事实固定在 [platform-rejection-calibration.md](platform-rejection-calibration.md)。新增两条
+不可放行的假 H3：
+
+- `source_selection_only`：两方案只是事件来源、输入来源或负责人来源不同，最终数据和下游结果
+  相同；
+- `equivalent_user_outcome`：两方案的 `correctness_effect` 或 `observable_result` 只用不同词
+  包装同一用户结果，没有不同数据版本、终态、文件或通知。
+
+v3 的 `false_h3_guards` 因此从六项扩展为八项，两项都必须为 `false`。契约还会比较两方案的
+正确性影响和可观察结果；连续公共片段达到 16 字或三段字符相似度达到 0.72 时按近似同义拦截。
+
+同时加入 `workload_design`，防止 P6：
+
+- 预期有效工具调用至少 55；
+- 至少 4 个工作切片；
+- 跨至少 2 个模块；
+- 每个切片有独立数据结果和验证；
+- 至少 2 条真实验证路径。
+
+这仍然只是出题侧下限；运行侧必须按实际轨迹再次检查 50 次平台下限。
 
 ### 自然业务条件范例
 
@@ -152,6 +176,29 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
     "data_artifact": "已发布订单数据集",
     "prompt_excerpt": "分析导出中心必须读取同一份已发布订单数据集，并保留来源批次。"
   },
+  "workload_design": {
+    "version": 1,
+    "expected_effective_tool_calls": 60,
+    "call_floor_rationale": "需要完成发布、恢复、导出联调和两条独立验证路径",
+    "work_slices": [
+      {"module": "订单发布", "implementation": "补齐发布版本与来源批次",
+       "data_result": "生成带来源批次的已发布订单数据集",
+       "verification": "核对重复发布不会产生两个有效版本"},
+      {"module": "订单发布", "implementation": "补齐恢复批次的缺失记录定位",
+       "data_result": "生成只包含未完成记录的恢复批次",
+       "verification": "中断重试不会覆盖上一完整批次"},
+      {"module": "分析导出中心", "implementation": "读取发布版本并生成导出文件",
+       "data_result": "生成可追溯的订单导出文件",
+       "verification": "导出文件与发布快照逐字段一致"},
+      {"module": "分析导出中心", "implementation": "处理迟到更正后的导出重建",
+       "data_result": "生成受影响业务窗口的补算清单",
+       "verification": "补算清单与完整发布版本可以相互追溯"}
+    ],
+    "verification_paths": [
+      "运行订单发布服务并调用恢复入口验证断点续做",
+      "运行导出中心并比较导出文件与发布快照"
+    ]
+  },
   "design_tradeoff": {
     "decision": "发布中断时以采集时间还是业务时间确定恢复边界",
     "decision_axis": "effective_time",
@@ -200,7 +247,9 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
       "implementation_only": false,
       "retry_or_error_message_only": false,
       "display_only": false,
-      "single_result_invariant_only": false
+      "single_result_invariant_only": false,
+      "source_selection_only": false,
+      "equivalent_user_outcome": false
     },
     "false_h3_counterexample": "先规定迟到更正必须采用业务时间，再提出恢复边界由设计者选择",
     "decision_impact": "时间轴选择影响恢复扫描范围与迟到更正的数据完整性",
@@ -270,7 +319,9 @@ P4/P5 中全部成立 H1/H2/H3，其中包括一条本地旧词面规则没有�
 - `module_integration.secondary_modules` 至少一个，`role` 必须是消费、写入、下游、审计、持久化、编排、通知或授权角色；列表/详情/概览等纯展示角色不允许。
 - `design_tradeoff.options` 至少两个不同且都可行的裁决，`decision_axis` 来自允许的冲突轴枚举，`trigger` 至少 12 字且逐字进入 `context_excerpt`，`outcome_invariant` 说明两种方案都必须守住的可观察结果，`implementation_not_prescribed` 必须为 `true`。
 - `context_excerpt` 至少 12 字且逐字进入题面；`context_anchors` 至少两条，一条 `supports=trigger`，另一条支撑 `option_a` 或 `option_b`，均须可回查。`option_analysis` 必须逐一对应所有 options，各写至少 12 字的 `benefit`、`cost`、`viable_when`、`correctness_effect`、`observable_result`，并通过 `preserves_constraint_ids` 覆盖全部 H1 约束编号；两个方案的 `correctness_effect` 和 `observable_result` 必须不同。`decision_impact` 至少 12 字，写清数据语义或处理链路的实际影响。
-- `both_options_valid`、`choice_changes_correctness`、`prompt_keeps_choice_open`、`fixed_branch_excluded` 必须为 `true`；`false_h3_guards` 的六项必须全为 `false`；`false_h3_counterexample` 必须写清本题最容易伪装成 H3 的固定裁决。
+- `both_options_valid`、`choice_changes_correctness`、`prompt_keeps_choice_open`、`fixed_branch_excluded` 必须为 `true`；`false_h3_guards` 的八项必须全为 `false`；`false_h3_counterexample` 必须写清本题最容易伪装成 H3 的固定裁决。
+- 两个方案的 `correctness_effect` 和 `observable_result` 不能近似同义。连续公共片段达到 16 字或三段字符相似度达到 0.72 时按假 H3 拒绝；来源、锁、队列或写序不同但最终数据结果相同也不成立。
+- `workload_design.version` 必须为 `1`，预期有效工具调用不少于 `55`，至少 `4` 个工作切片、两个模块和两条验证路径；每个切片必须写独立数据结果和验证。
 - `design_tradeoff.prompt_excerpt` 必须逐字进入题面，用具体业务条件承载同一未定冲突轴并与 `context_excerpt` 对应；只写兼容、回滚、重试、结果不变量或固定“以谁为准”无效。不要求选择权声明，显式委托句由表达闸拒绝。词面检测只筛查证据形态，不能替代人工审查两个方案是否真实可行。
 - 同一冲突轴不得在题面另一句被固定为唯一内部方案；用户规定的结果边界不等于内部方案。发现设计卡与题面矛盾时重审该轴，不能追加一句委托设计者来制造开放性。
 - `hard_evidence` 至少一项，必须来自统一 G16 判据的硬证据组。

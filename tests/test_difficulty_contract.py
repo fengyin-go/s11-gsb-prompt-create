@@ -85,6 +85,43 @@ class DifficultyContractTest(unittest.TestCase):
                     "分析导出中心必须读取同一份已发布订单数据集并保留来源批次。"
                 ),
             },
+            "workload_design": {
+                "version": 1,
+                "expected_effective_tool_calls": 60,
+                "call_floor_rationale": (
+                    "需要跨两个模块完成实现、数据回填、导出联调和两条独立验证路径"
+                ),
+                "work_slices": [
+                    {
+                        "module": "订单解析",
+                        "implementation": "补齐订单版本与来源批次的归一处理",
+                        "data_result": "生成带来源批次的可发布订单数据集",
+                        "verification": "核对同一订单不会生成重复发布版本",
+                    },
+                    {
+                        "module": "订单解析",
+                        "implementation": "补齐中断后的缺失记录定位和补写",
+                        "data_result": "生成只包含未完成记录的恢复批次",
+                        "verification": "中断后重试不会覆盖上一完整批次",
+                    },
+                    {
+                        "module": "分析导出中心",
+                        "implementation": "让导出中心读取已发布版本和来源批次",
+                        "data_result": "生成可追溯的订单导出文件",
+                        "verification": "导出文件与发布版本逐字段一致",
+                    },
+                    {
+                        "module": "分析导出中心",
+                        "implementation": "处理迟到更正后的导出重建",
+                        "data_result": "生成受影响业务窗口的补算清单",
+                        "verification": "补算清单与完整发布快照可以相互追溯",
+                    },
+                ],
+                "verification_paths": [
+                    "运行订单发布服务并调用恢复入口验证断点续做",
+                    "运行导出中心并比较导出文件与发布快照",
+                ],
+            },
             "design_tradeoff": {
                 "decision": "恢复边界按采集时间还是业务时间确定",
                 "decision_axis": "effective_time",
@@ -144,6 +181,8 @@ class DifficultyContractTest(unittest.TestCase):
                     "retry_or_error_message_only": False,
                     "display_only": False,
                     "single_result_invariant_only": False,
+                    "source_selection_only": False,
+                    "equivalent_user_outcome": False,
                 },
                 "false_h3_counterexample": (
                     "题面先写迟到更正必须采用业务时间，再追加由设计者选择恢复边界"
@@ -441,6 +480,50 @@ class DifficultyContractTest(unittest.TestCase):
         )
         self.assertEqual(difficulty_contract._fixed_branch_evidence(excerpt), [])
         self.assertTrue(difficulty_contract._has_tradeoff_evidence(excerpt, excerpt))
+
+    def test_workload_floor_rejects_three_slice_prompt(self):
+        topic = copy.deepcopy(self.topic)
+        workload = topic["task_plan"][0]["difficulty_design"]["workload_design"]
+        workload["work_slices"] = workload["work_slices"][:3]
+        errors = self.errors(topic)
+        self.assertTrue(any("至少要有 4 个工作切片" in error for error in errors))
+
+    def test_workload_floor_rejects_low_expected_calls(self):
+        topic = copy.deepcopy(self.topic)
+        topic["task_plan"][0]["difficulty_design"]["workload_design"][
+            "expected_effective_tool_calls"
+        ] = 42
+        errors = self.errors(topic)
+        self.assertTrue(any("expected_effective_tool_calls" in error for error in errors))
+
+    def test_source_only_h3_with_equivalent_outcomes_is_rejected(self):
+        topic = copy.deepcopy(self.topic)
+        tradeoff = topic["task_plan"][0]["difficulty_design"]["design_tradeoff"]
+        tradeoff["options"] = ["以关闭请求触发停止", "以暂停回执确认停止"]
+        analysis = tradeoff["option_analysis"]
+        analysis[0].update({
+            "option": "以关闭请求触发停止",
+            "correctness_effect": "关闭请求到达后作业停止，后续offset不再推进",
+            "observable_result": "作业实例显示已停止，消费位点保持不变",
+        })
+        analysis[1].update({
+            "option": "以暂停回执确认停止",
+            "correctness_effect": "暂停回执到达后作业停止，后续offset不再推进",
+            "observable_result": "作业实例显示已停止，消费位点保持不变",
+        })
+        errors = self.errors(topic)
+        self.assertTrue(any("只是来源或机制不同" in error for error in errors))
+
+    def test_new_h3_false_guards_are_required(self):
+        topic = copy.deepcopy(self.topic)
+        guards = topic["task_plan"][0]["difficulty_design"]["design_tradeoff"][
+            "false_h3_guards"
+        ]
+        guards.pop("source_selection_only")
+        guards.pop("equivalent_user_outcome")
+        errors = self.errors(topic)
+        self.assertTrue(any("source_selection_only" in error for error in errors))
+        self.assertTrue(any("equivalent_user_outcome" in error for error in errors))
 
     def test_difficulty_note_cannot_override_g16(self):
         from check_prompt_g16 import check

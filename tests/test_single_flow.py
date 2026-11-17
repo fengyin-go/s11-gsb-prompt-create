@@ -90,6 +90,29 @@ class SingleFlow(unittest.TestCase):
                                              "data_artifact": "订单数据集",
                                             "prompt_excerpt": "导出订单数据集。",
                                          },
+                                         "workload_design": {
+                                             "version": 1,
+                                             "expected_effective_tool_calls": 60,
+                                             "call_floor_rationale": "需要完成订单恢复、导出联调和两条独立验证路径",
+                                             "work_slices": [
+                                                 {"module": "orders", "implementation": "补齐订单来源批次与恢复入口",
+                                                  "data_result": "生成带来源批次的订单数据集",
+                                                  "verification": "核对重复恢复不会覆盖完整批次"},
+                                                 {"module": "orders", "implementation": "补齐失败记录的断点定位",
+                                                  "data_result": "生成只包含缺失记录的恢复批次",
+                                                  "verification": "中断重试后从缺失记录继续"},
+                                                 {"module": "exports", "implementation": "读取订单数据集生成导出文件",
+                                                  "data_result": "生成带来源批次的导出文件",
+                                                  "verification": "导出文件与订单数据集逐字段一致"},
+                                                 {"module": "exports", "implementation": "处理补算后的导出重建",
+                                                  "data_result": "生成受影响窗口的补算导出",
+                                                  "verification": "补算导出与完整快照可以追溯"},
+                                             ],
+                                             "verification_paths": [
+                                                 "运行订单恢复入口并核对断点续做",
+                                                 "运行导出入口并比较导出文件与订单数据集",
+                                             ],
+                                         },
                                          "design_tradeoff": {
                                              "decision": "恢复边界采用采集时间还是业务时间",
                                              "decision_axis": "effective_time",
@@ -131,6 +154,8 @@ class SingleFlow(unittest.TestCase):
                                                  "retry_or_error_message_only": False,
                                                  "display_only": False,
                                                  "single_result_invariant_only": False,
+                                                 "source_selection_only": False,
+                                                 "equivalent_user_outcome": False,
                                              },
                                              "false_h3_counterexample": (
                                                  "先规定必须使用业务时间，再追加由设计者选择恢复边界"

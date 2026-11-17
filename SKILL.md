@@ -52,6 +52,11 @@ H3 可验证设计裁决）。v3 新增的校准来自 `dfzr10012`：`14-bugfix`
 [references/difficulty-hardening.md](references/difficulty-hardening.md)；新题位不得再落到
 “单页/单台账状态一致、第二模块只展示、题面把实现步骤写死”的中等模板。
 
+`dfzr10012 / b1115-01` 的最终回执又提供了 17 条失败校准：12 条是 H1/H2 成立但 H3 不成立，
+2 条是 A-5 公共长片段，1 条是 P6 工具调用不足，2 条是运行期读取私有会话轨迹。逐题原因、
+H3 三段测试和工作量要求固定在
+[references/platform-rejection-calibration.md](references/platform-rejection-calibration.md)。
+
 GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositories, too quickly` 创建频控时，记录原因并等待重试，优先遵守 Retry-After，否则从 60 秒指数退避到最多 900 秒，默认等待预算 2 小时，可用 `S11_GITHUB_RETRY_BUDGET_SECONDS` 调整。等待期间每次最多暂停 30 秒并向用户报告进展。权限、认证、仓库重名和非限流错误不能冒充限流重试。预算耗尽后保留清单并报告恢复位置；重试仍只能使用本批登记的仓库，不改名或认领陌生仓库。
 
 ## 单份目录和 main
@@ -137,6 +142,10 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 
 写题面前先填写 `difficulty_design`，不能用最终题面倒填。H1 至少写两条不同类别且相互作用的硬约束，每条使用 `C1`、`C2` 等稳定编号，并写清省略后的失败后果；H2 的第二模块必须消费、写入、持久化或编排真实数据产物，不能只是列表/详情/概览展示；H3 的两个可行方案、代价和选择影响只写在内部设计中，题面用具体冲突条件、处理边界和可观察结果自然承载取舍，不写“由你权衡优先项”“由设计者决定”“请自行选择”等委托句，也不列参考实现选项。仅写“兼容历史”“固定以某版本为准”“失败后重试”或只写一句结果不变量都不算 H3。同一冲突轴不能被题面预先固定为唯一实现。
 
+每个题位还要填写 `workload_design`：至少 4 个工作切片、跨至少 2 个模块、每个切片有独立
+数据结果和验证、至少 2 条真实验证路径，预期有效工具调用不少于 55。P6 按实际轨迹计数，
+该设计只降低风险；运行侧仍要用实际调用数在提交前再拦一次。
+
 三段 `prompt_excerpt` 必须逐字出现在最终题面，源码锚点必须跨两个模块并可回查。`check_prompt_g16.py` 是平台词面下限和已知正样本校准；`difficulty_contract.py` v3 是独立的 H3 结构审计，两者都必须通过。旧校准语料中的显式委托句仅保留历史识别用途，不是新题模板；新题由业务矛盾及结构化方案代价证明 H3，表达闸拒绝显式委托句。
 
 ### H3 实证裁决模型
@@ -148,8 +157,13 @@ H3 不是“题面出现冲突”，也不是“登记了两个选项”。每�
 3. 每个方案必须在 `option_analysis.preserves_constraint_ids` 中覆盖全部 H1 约束编号。任一方案违反 H1、H2 或共同不变量，就不是 H3，直接淘汰。
 4. 每个方案必须分别写 `correctness_effect` 和 `observable_result`，且至少有两个互不相同的正确性后果和用户可观察结果。只改变类结构、锁类型、函数拆分、重试次数或页面提示，不算 H3。
 5. `outcome_invariant` 是两种方案都必须守住的共同边界，例如“只能有一个确认版本”“下游不能读到半成品”；它不是某一方案的胜负。
-6. 题面只能呈现冲突和共同不变量，不能提前写“必须采用新版本”“必须保护引用快照”“不能写回旧值”等分支胜负。`prompt_keeps_choice_open`、`both_options_valid`、`choice_changes_correctness` 必须为 `true`，`fixed_branch_excluded` 必须为 `true`，`false_h3_guards` 六项必须全为 `false`。
+6. 题面只能呈现冲突和共同不变量，不能提前写“必须采用新版本”“必须保护引用快照”“不能写回旧值”等分支胜负。`prompt_keeps_choice_open`、`both_options_valid`、`choice_changes_correctness` 必须为 `true`，`fixed_branch_excluded` 必须为 `true`，`false_h3_guards` 八项必须全为 `false`。
 7. `context_anchors` 至少两条，一条 `supports=trigger`，另一条支撑 `option_a` 或 `option_b`；只指向 `STATUS_ORDER`、函数名或通用 CRUD 代码不算真实取舍依据。
+
+新增的 `source_selection_only` 和 `equivalent_user_outcome` 必须为 `false`：两个方案不能只是
+输入来源、锁、队列或写入机制不同，也不能在数据版本、下游文件、通知或用户页面上得到近似
+相同结果。删掉题面的固定裁决句后，如果一条路径必须违反 H1，或两种路径最终数据结果相同，
+该项不是 H3，必须换题。
 
 正向校准是 `14-bugfix`：清理回执与恢复事件同时更新同一检查点时，既可以让清理终态获胜并延后恢复，也可以让恢复终态获胜并延后清理；两种都满足“只能有一个确认版本”，但路径释放、恢复入口和下游可见结果不同。
 反向校准是 `10-development` 和 `11-bugfix`：前者已规定引用快照不可清理，后者已规定旧配置不能写回；第二个方案被 H1 排除，题面没有留下真实裁决。
@@ -239,6 +253,17 @@ python3 <skill>/scripts/check_prompt_difficulty.py --parent <batch目录>
 python3 <skill>/scripts/check_prompt_dedup.py --parent <batch目录> --include-history
 python3 <skill>/scripts/check_cross_project_prompts.py --batch-dir <batch目录> --registry <注册表> --require-registry --require-coverage --min-peer-batches 1 --require-platform-corpus
 ```
+
+批次已经产生平台回执后，新增失败先做责任归因，不能把所有作废都改写成 Feedback：
+
+```bash
+python3 <skill>/scripts/batch_platform_audit.py \
+  --batch-dir <batch目录> \
+  --output <批次目录>/platform-rejection-analysis.json
+```
+
+P5、P6 和 A-5 属于出题侧；私有轨迹读取属于运行侧。只有失败检查明确指向 Feedback 字段时，
+才进入运行侧的 Feedback 返修。
 
 ## 4. 交接给运行侧
 

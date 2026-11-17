@@ -272,7 +272,9 @@ G19 疑似不达中等、硬证据只出现在末句（「主诉求还是列表�
   不同源码文件、两个模块且原文和行号可回查。
 - `context_anchors` 至少两条，一条 `supports=trigger`，另一条支撑 `option_a` 或
   `option_b`；只指向 `STATUS_ORDER`、函数名或通用 CRUD 代码不算真实取舍依据。
-- `anti_patterns` 的七项必须全为 `false`；`false_h3_guards` 的六项也必须全为 `false`。
+- `anti_patterns` 的七项必须全为 `false`；`false_h3_guards` 的八项也必须全为 `false`。
+- `workload_design` 必须达到 55 次预期有效调用、4 个工作切片、两个模块和两条验证路径；只写
+  “多写测试”不算工作量设计。
   题面连续出现四个以上“先/再/逐项/依次”等过程词，同时没有开放判断或结果不变量时直接拒绝。
 
 2026-11-15 `cc10010 / b1113-01` 的 8 条真实 `QC_PASSED` 样本已经证明：
