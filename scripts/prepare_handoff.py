@@ -114,6 +114,7 @@ def validate_prompt_opportunity(parent, origin, topic_map_path):
         "source_commit": checked["source_commit"],
         "source_base_commit": checked.get("source_base_commit"),
         "repo_topic_map_sha256": checked.get("repo_topic_map_sha256"),
+        "dedup_contract_version": checked.get("dedup_contract_version"),
         "target_count": checked.get("target_count"),
         "selection_policy": checked.get("selection_policy"),
         "selected_count": checked.get("selected_count"),

@@ -40,6 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import batch_prompt_workbook as workbook_lib  # noqa: E402
 from prompt_history_lib import detect_prefix, load_history, strip_legacy_context_boilerplate  # noqa: E402
+import semantic_dedup  # noqa: E402
 
 
 DEFAULT_THRESHOLD = 0.2
@@ -658,6 +659,7 @@ def load_history_prompts(
 def check(
     items: list[tuple[str, str]],
     threshold: float,
+    semantic_items: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, object]:
     texts = [prompt for _, prompt in items]
     business_texts = [strip_scaffolding(text) for text in texts]
@@ -686,6 +688,8 @@ def check(
     max_text = 0.0
     max_semantic = 0.0
     pair_count = 0
+    semantic_pairs = 0
+    semantic_collisions: list[dict[str, object]] = []
 
     for left, right in itertools.combinations(range(len(items)), 2):
         pair_count += 1
@@ -700,6 +704,38 @@ def check(
                 check_internal=False,
             ),
         })
+        left_semantic = (semantic_items or {}).get(left_label)
+        right_semantic = (semantic_items or {}).get(right_label)
+        if left_semantic and right_semantic:
+            semantic_pairs += 1
+            compared = semantic_dedup.pair_result(
+                {
+                    "sequence": left_semantic.get("sequence"),
+                    "topic": left_semantic.get("topic"),
+                    "semantic_identity": left_semantic.get("semantic_identity"),
+                },
+                {
+                    "sequence": right_semantic.get("sequence"),
+                    "topic": right_semantic.get("topic"),
+                    "semantic_identity": right_semantic.get("semantic_identity"),
+                },
+            )
+            if compared["collision"]:
+                collision = {
+                    "kind": "semantic_identity_collision",
+                    "score": compared["score"],
+                    "left": left_label,
+                    "right": right_label,
+                    "left_prompt": left_prompt,
+                    "right_prompt": right_prompt,
+                    "shared_outcome_keys": compared["shared_outcome_keys"],
+                    "shared_artifact_keys": compared["shared_artifact_keys"],
+                    "shared_acceptance_entities": compared[
+                        "shared_acceptance_entities"
+                    ],
+                }
+                semantic_collisions.append(collision)
+                violations.append(collision)
         left_type = task_type_from_label(left_label)
         right_type = task_type_from_label(right_label)
         if left_type and right_type and left_type != right_type:
@@ -768,6 +804,9 @@ def check(
         "threshold": threshold,
         "checked_count": len(items),
         "pairs_checked": pair_count,
+        "semantic_identity_checked_pairs": semantic_pairs,
+        "semantic_identity_collision_count": len(semantic_collisions),
+        "semantic_identity_collisions": semantic_collisions,
         "max_text_overlap": round(max_text, 4),
         "max_semantic_similarity": round(max_semantic, 4),
         "generic_capabilities": sorted(generic_capabilities),

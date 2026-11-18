@@ -17,6 +17,7 @@ from typing import Iterator
 import batch_prompt_workbook as workbook
 import domain_fit
 import difficulty_contract
+import semantic_dedup
 import check_prompt_type_intent
 import github_helpers as hub
 import create_source_snapshot as source_snapshot
@@ -328,6 +329,23 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
     base_repo_name = snapshot["source_name"] if snapshot else source_repo_name(remote)
     topic_map = load_topic_map(repo=source, parent=parent, explicit=topic_path,
                               required=True, expected_base_commit=commit)
+    existing_batch = any(
+        path.exists()
+        for path in (
+            parent / MANIFEST,
+            parent / QUEUE_FILE,
+        )
+    ) or any(
+        (child / "task.json").is_file()
+        for child in parent.iterdir()
+        if child.is_dir()
+    ) if parent.exists() else False
+    semantic_errors = semantic_dedup.map_errors(
+        topic_map,
+        require=not existing_batch,
+    )
+    if semantic_errors:
+        raise ValueError("提示词语义查重契约未通过：" + "；".join(semantic_errors))
     domain_errors = domain_fit.map_errors(topic_map, source)
     if domain_errors:
         raise ValueError("领域题位契约未通过：" + "；".join(domain_errors))

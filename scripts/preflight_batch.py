@@ -30,6 +30,7 @@ RULES = (
     "difficulty_contract",
     "theme",
     "structural_difficulty",
+    "semantic_intent",
     "batch_dedup",
     "g16",
     "g16_strict",
@@ -205,6 +206,10 @@ def _collect_write_gate(
         "difficulty_contract",
         list((gate.get("difficulty_contract") or {}).get("problems") or []),
     )
+    collector.add_strings(
+        "semantic_intent",
+        list((gate.get("semantic_identity") or {}).get("problems") or []),
+    )
     for violation in (gate.get("theme") or {}).get("violations") or []:
         collector.add("theme", json.dumps(violation, ensure_ascii=False), details=violation)
     for violation in (gate.get("difficulty") or {}).get("violations") or []:
@@ -218,8 +223,13 @@ def _collect_write_gate(
     for violation in (gate.get("dedup") or {}).get("violations") or []:
         left = str(violation.get("left") or "").split("[", 1)[0]
         right = str(violation.get("right") or "").split("[", 1)[0]
+        rule = (
+            "semantic_intent"
+            if str(violation.get("kind") or "").startswith("semantic_identity_")
+            else "batch_dedup"
+        )
         collector.add(
-            "batch_dedup",
+            rule,
             (
                 f"{left or '批内候选'} 与 {right or '批内候选'} "
                 f"{violation.get('kind')} {violation.get('score')}"

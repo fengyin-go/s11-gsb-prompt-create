@@ -161,6 +161,12 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
         difficulty_design = raw.get("difficulty_design")
         if difficulty_design is not None and not isinstance(difficulty_design, dict):
             raise TopicMapError(f"{where} 的 difficulty_design 必须是对象")
+        semantic_identity = raw.get("semantic_identity")
+        if semantic_identity is not None and not isinstance(semantic_identity, dict):
+            raise TopicMapError(f"{where} 的 semantic_identity 必须是对象")
+        semantic_contrast = raw.get("semantic_contrast") or []
+        if not isinstance(semantic_contrast, list):
+            raise TopicMapError(f"{where} 的 semantic_contrast 必须是数组")
         task_plan.append(
             {
                 "sequence": sequence,
@@ -173,6 +179,16 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
                 "difficulty_design": (
                     dict(difficulty_design) if isinstance(difficulty_design, dict) else None
                 ),
+                "semantic_identity": (
+                    dict(semantic_identity)
+                    if isinstance(semantic_identity, dict)
+                    else None
+                ),
+                "semantic_contrast": [
+                    dict(item)
+                    for item in semantic_contrast
+                    if isinstance(item, dict)
+                ],
             }
         )
     task_plan.sort(key=lambda item: int(item["sequence"]))
@@ -186,6 +202,7 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
         "subdirection": str(payload.get("subdirection") or "").strip(),
         "base_commit": str(payload.get("base_commit") or "").strip(),
         "difficulty_contract_version": payload.get("difficulty_contract_version"),
+        "dedup_contract_version": payload.get("dedup_contract_version"),
         "max_capacity": max_capacity,
         "topics": topics,
         "task_plan": task_plan,

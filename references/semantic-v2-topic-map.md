@@ -10,6 +10,7 @@
   "subdirection": "数仓与数据湖",
   "base_commit": "最终已推送的40位SHA",
   "difficulty_contract_version": 3,
+  "dedup_contract_version": 1,
   "max_capacity": 20,
   "topics": [
     {
@@ -32,6 +33,22 @@
       "topic": "orders",
       "family": "新增能力",
       "angle": "基于真实代码选择的独特切入点",
+      "semantic_identity": {
+        "version": 1,
+        "object_key": "orders",
+        "operation_key": "export",
+        "outcome_keys": [
+          "order_dataset_published",
+          "export_traceable"
+        ],
+        "artifact_keys": [
+          "order_dataset"
+        ],
+        "acceptance_entities": [
+          "订单明细数据集"
+        ]
+      },
+      "semantic_contrast": [],
       "difficulty_design": {
         "version": 3,
         "reasoning_challenge": {
@@ -240,6 +257,37 @@
 最终题面除命中 topic、`domain_objects` 和 `domain_results` 外，还必须逐字写入 `domain_chain` 的输入、处理、输出、可观察结果以及前置的 `prompt_main_request`。脚本会核对源码锚点、连续原文和主请求位置；只出现业务名词、把领域句放在末尾或替换对象后仍是通用服务任务，都会在写表前被拦下。细节见 [domain-fit.md](domain-fit.md)。
 
 `difficulty_contract_version` 和 `task_plan[].difficulty_design` 是独立的第二个硬契约。H1/H2/H3 的题面摘录必须逐字出现在最终提示词，第二模块必须是真实数据流角色，设计取舍必须至少保留两个方案。v3 要求两个方案都覆盖全部 H1 约束编号，分别产生不同的正确性影响和可观察结果；题面只能留下共同不变量，不能预先规定哪个分支获胜。`context_anchors` 至少两条，一条支撑触发条件，一条支撑至少一个方案边界。完整字段、`dfzr10012` 的 `14` 正样本与 `10/11` 反样本见 [difficulty-hardening.md](difficulty-hardening.md)。
+
+`dedup_contract_version: 1` 和 `task_plan[].semantic_identity` 是独立的语义查重契约。
+`object_key` 必须等于 topic id；`operation_key` 使用
+`scripts/semantic_dedup.py` 的有限枚举；`outcome_keys` 至少两个，`artifact_keys` 至少一个，
+`acceptance_entities` 至少一个。正式机会卡中的这两个字段必须与 topic map 完全一致。
+
+同一 topic 下，`object_key + operation_key` 相同且 outcome、artifact、acceptance 任一有
+交集时直接拒绝。不同任务类型不是差异。非冲突的同 topic 题位必须通过
+`semantic_contrast` 指向同主题 peer，写至少两个不同维度，并至少包含 `operation` 或
+`observable_result`。示例：
+
+```json
+{
+  "peer_sequence": 5,
+  "differences": [
+    {
+      "dimension": "operation",
+      "self": "导出筛选后的执行日志",
+      "peer": "恢复失败执行日志的重试记录"
+    },
+    {
+      "dimension": "observable_result",
+      "self": "用户得到可追溯的导出文件",
+      "peer": "用户得到独立的重试记录"
+    }
+  ]
+}
+```
+
+没有能力写出一条新的主业务动作或新的用户可观察结果时，只能把 topic 的第二座位降为 1；
+需要更多题量时换 topic 或换仓库，不能把同一重试/恢复问题换成另一种任务类型重写。
 
 类型策略 `type_policy` 默认 `capacity-first`：30/30/30/5/5 只是建议，不因配比缩减最高有效容量。只有用户明确指定固定比例才设 `strict-ratio` 并由 s11_policy.allocate_counts 校验。validate_topic_map.py 始终校验 schema、合法类型、topic 席位与基准 SHA。扩容保留旧条目的 sequence、type、topic、family、angle、任务号与仓库，只向末尾追加。
 

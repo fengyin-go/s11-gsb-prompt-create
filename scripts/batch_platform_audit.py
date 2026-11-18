@@ -31,6 +31,11 @@ CHECK_POLICY: dict[str, dict[str, str]] = {
         "owner": "s11-gsb-prompt-create",
         "action": "change_story_shape_and_raw_a5_fragment",
     },
+    "admin_semantic_duplicate": {
+        "category": "prompt_dedup",
+        "owner": "s11-gsb-prompt-create",
+        "action": "change_semantic_identity_or_remove_second_topic_seat",
+    },
     "trace_memory": {
         "category": "runtime_memory",
         "owner": "s11-feedback-run",
@@ -119,6 +124,23 @@ def audit(batch_dir: Path) -> dict[str, Any]:
                 "check_key": check.get("check_key"),
                 "check_name": check.get("check_name"),
                 "summary": check.get("summary"),
+                **policy,
+            })
+        summary = str(receipt.get("qc_summary") or "")
+        if (
+            status == "DISCARDED"
+            and "重复" in summary
+            and "相似" in summary
+        ):
+            policy = CHECK_POLICY["admin_semantic_duplicate"]
+            owners.add(policy["owner"])
+            categories.add(policy["category"])
+            category_counts[policy["category"]] += 1
+            owner_counts[policy["owner"]] += 1
+            failures.append({
+                "check_key": "admin_semantic_duplicate",
+                "check_name": "管理员判定语义重复",
+                "summary": summary,
                 **policy,
             })
         tasks.append({

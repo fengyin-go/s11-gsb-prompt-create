@@ -11,6 +11,7 @@
 - 源仓库当前 HEAD。
 - `repo-topic-map.json` 的源码基线。
 - topic map 文件 SHA-256。
+- `dedup_contract_version` 与 topic map 一致。
 - 正式机会数量与 `repo-topic-map.json` 的 `task_plan` 完全一致。
 - 正式机会在 12 个可用需求模式之间均匀铺开，每个模式最多 3 条；题位不足 12 条时使用
   相同数量的不同模式。
@@ -29,6 +30,10 @@ python3 <skill>/scripts/check_prompt_opportunities.py \
 
 通过后，机会地图只作为起草辅助。每条题面仍需重新阅读源码、复核故事卡并从最终正文提取
 领域链与 H1/H2/H3 证据。机会卡不是最终题面，不能直接复制进工作簿。
+
+新批次的每张 selected 机会卡还必须原样复制 topic map 的 `semantic_identity` 和
+`semantic_contrast`。机会卡不能自行改细对象名、动作或验收对象来绕过同主题查重。建仓前
+会先用这些字段两两比较；同一业务对象和主操作共享数据产物或验收对象时直接拒绝。
 
 新机会地图使用 `selection_policy=capacity-balanced-up-to-three-per-mode`。旧的固定
 36 条地图仍可读取，但只适用于刚好 36 个题位的批次。

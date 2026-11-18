@@ -565,6 +565,7 @@ def run_write_gates(
     import domain_fit
     import difficulty_contract
     import prompt_style
+    import semantic_dedup
     from check_repo_theme import (
         DEFAULT_MAX_PER_MODE,
         GATE_VERSION,
@@ -620,6 +621,9 @@ def run_write_gates(
     difficulty_contract_errors = (
         difficulty_contract.prompt_errors(records, topic_map, repo) if topic_map else []
     )
+    semantic_prompt_errors = (
+        semantic_dedup.prompt_errors(records, topic_map) if topic_map else []
+    )
     base_ledger = merge_ledgers(
         load_ledger(parent / LEDGER_FILENAME),
         load_ledger(repo_ledger_path(repo)) if repo else {},
@@ -663,7 +667,12 @@ def run_write_gates(
         defect_structure=True,
         defect_labels=defect_labels,
     )
-    dedup = dedup_check(items, 0.2)
+    semantic_items = (
+        semantic_dedup.items_for_labels(topic_map, [label for label, _ in items])
+        if topic_map
+        else {}
+    )
+    dedup = dedup_check(items, 0.2, semantic_items=semantic_items)
 
     problems: list[str] = []
     problems += [f"题面表达未通过：{error}" for error in style_errors]
@@ -671,6 +680,7 @@ def run_write_gates(
     problems += [f"领域相关性未通过：{error}" for error in domain_errors]
     problems += [f"任务类型语义未通过：{error}" for error in type_intent_errors]
     problems += [f"困难设计契约未通过：{error}" for error in difficulty_contract_errors]
+    problems += [f"语义身份契约未通过：{error}" for error in semantic_prompt_errors]
     pending_rows = sum(1 for record in records if not str(record.get("提示词") or "").strip())
     deferred_batch_ratios = {
         "新增能力类占比超额",
@@ -748,6 +758,20 @@ def run_write_gates(
             "version": difficulty_contract.CONTRACT_VERSION,
             "problems": difficulty_contract_errors,
         },
+        "semantic_identity": {
+            "ok": not semantic_prompt_errors,
+            "version": semantic_dedup.CONTRACT_VERSION,
+            "contract_version": (
+                topic_map.get("dedup_contract_version") if topic_map else None
+            ),
+            "problems": semantic_prompt_errors,
+            "checked_pairs": dedup.get("semantic_identity_checked_pairs", 0),
+            "collision_count": dedup.get(
+                "semantic_identity_collision_count",
+                0,
+            ),
+            "collisions": dedup.get("semantic_identity_collisions", []),
+        },
         "theme": {
             "ok": theme.get("ok"),
             "topic_policy": theme.get("topic_policy"),
@@ -782,6 +806,18 @@ def run_write_gates(
             ),
             "raw_a5_window_hits": dedup.get("raw_a5_window_hits", 0),
             "raw_a5_nearest_pairs": dedup.get("raw_a5_nearest_pairs", []),
+            "semantic_identity_checked_pairs": dedup.get(
+                "semantic_identity_checked_pairs",
+                0,
+            ),
+            "semantic_identity_collision_count": dedup.get(
+                "semantic_identity_collision_count",
+                0,
+            ),
+            "semantic_identity_collisions": dedup.get(
+                "semantic_identity_collisions",
+                [],
+            ),
         },
     }
 
@@ -822,6 +858,10 @@ def write_generation_manifest(
         "prompt_naturalness": gate.get("prompt_naturalness") or {},
         "type_intent": gate.get("type_intent") or {},
         "difficulty_contract": gate.get("difficulty_contract") or {},
+        "semantic_identity": gate.get("semantic_identity") or {},
+        "dedup_contract_version": (
+            gate.get("semantic_identity") or {}
+        ).get("contract_version"),
         "dedup": dedup,
         "raw_a5_ok": dedup.get("raw_a5_ok"),
         "raw_a5_violation_count": dedup.get("raw_a5_violation_count"),

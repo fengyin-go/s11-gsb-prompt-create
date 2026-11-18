@@ -19,7 +19,14 @@ class BatchPlatformAuditTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.batch = Path(self.temp.name)
 
-    def write_receipt(self, task_id: str, status: str, checks: list[dict]) -> None:
+    def write_receipt(
+        self,
+        task_id: str,
+        status: str,
+        checks: list[dict],
+        *,
+        summary: str = "",
+    ) -> None:
         review = self.batch / task_id / "review"
         review.mkdir(parents=True)
         (review / "upload.json").write_text(
@@ -27,6 +34,7 @@ class BatchPlatformAuditTest(unittest.TestCase):
                 "task_id": task_id,
                 "submission_id": 100,
                 "remote_status": status,
+                "qc_summary": summary,
                 "qc_checks": checks,
             }, ensure_ascii=False),
             encoding="utf-8",
@@ -79,6 +87,25 @@ class BatchPlatformAuditTest(unittest.TestCase):
         self.assertEqual(
             by_id["repo-02-bugfix"]["owners"],
             ["s11-feedback-run", "s11-gsb-prompt-create"],
+        )
+
+    def test_admin_semantic_duplicate_is_owned_by_prompt_generation(self):
+        self.write_receipt(
+            "repo-05-bugfix",
+            "DISCARDED",
+            [],
+            summary="管理员废弃：重复，prompt与其他高度相似",
+        )
+
+        result = batch_platform_audit.audit(self.batch)
+
+        self.assertEqual(result["category_counts"]["prompt_dedup"], 1)
+        failure = result["tasks"][0]["failures"][0]
+        self.assertEqual(failure["check_key"], "admin_semantic_duplicate")
+        self.assertEqual(failure["owner"], "s11-gsb-prompt-create")
+        self.assertEqual(
+            failure["action"],
+            "change_semantic_identity_or_remove_second_topic_seat",
         )
 
 

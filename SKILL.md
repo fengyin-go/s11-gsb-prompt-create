@@ -19,14 +19,15 @@ description: "solo11 单轮 pointwise 批量出题：可从 GitHub/Git 仓库或
 
 提速只允许压缩等待和重复计算，不允许减少检查面或降低阈值。正式批次按以下顺序执行：
 
-1. 完成容量排序、题位冻结、启动预检，并通过 topic map 的领域、类型和困难设计检查。
+1. 完成容量排序、题位冻结、启动预检，并通过 topic map 的领域、类型、困难设计和
+   语义身份检查。新批次的同一业务动作不能因为任务类型不同而重复占位。
 2. 立即冻结 GitHub 建仓队列并启动后台 worker；它可以在前台继续做源码审计和题面设计时
    承担逐个建仓、频控等待、推送、克隆和最终远端复检。
 3. 题面按题位继续逐条设计，不做“先写完全部再一次性发现问题”的流程。每条样稿仍先过
-   表达、自然度、领域、类型和 H1/H2/H3 自动准入。
+   表达、自然度、领域、类型、H1/H2/H3 和语义身份自动准入。
 4. 全量候选先运行一次只读聚合预检，把同一候选在所有门禁上的问题一次列出并集中返修。
-5. 聚合预检通过后才调用 `update-many` 正式写表。跨项目查重默认读取增量缓存，只重算
-   新题面、阈值变化或语料变化涉及的两两比较。
+5. 聚合预检通过后才调用 `update-many` 正式写表。跨项目查重默认读取增量缓存；同项目和
+   同 topic 的语义身份比较始终执行，不因任务类型不同而跳过。
 6. 写表完成后仍执行全部正式闸、最终全量复检、工作簿回读、交接清单和 `fbr_run` dry-run。
    缓存命中、后台建仓完成或聚合计通过都不能替代这些最终检查。
 
@@ -112,6 +113,23 @@ python3 <skill>/scripts/preflight_batch.py \
 
 正式批次数量取仓库有效容量，不再固定 36 条。有效容量小于 36 时按实际容量生成并交付；容量大于 36 时按 12 个可用需求模式、每模式最多 3 条封顶为 36 条。题位数量必须先由 `compute_capacity` 和 `seat_capacity` 决定，再生成同数量的机会卡与工作簿行；不能为凑固定数量编造缺陷、放宽难度、去重、topic 家族或模式上限。`30/30/30/5/5` 仅作任务类型建议，真实 Bugfix、重构或迁移目标不足时使用其他有证据支持的类型。不出代码理解，不把普通工程化泛题标作依赖升级。
 
+2026-11-18 起，新批次必须填写 `dedup_contract_version: 1`。每个 `task_plan[]` 和正式
+机会卡都要写同一份 `semantic_identity`：
+
+- `object_key` 等于 topic id；
+- `operation_key` 使用有限动作枚举：`create`、`update`、`query`、`export`、`validate`、
+  `retry_recover`、`archive`、`rollback`、`publish`、`deduplicate`、`schedule`、
+  `notify`、`migrate`、`delete`；
+- 至少两个 `outcome_keys`、一个 `artifact_keys` 和至少一个
+  `acceptance_entities`；
+- 同 topic 的第二个题位必须为同主题其他题位写 `semantic_contrast`，至少两个不同维度，
+  且包含 `operation` 或 `observable_result`。
+
+同一 `object_key`、`operation_key` 且 outcome、artifact 或 acceptance 有交集时直接判为
+同一语义任务。`Bugfix` 与 `功能优化` 不是语义差异，不能靠改任务类型、换 family、改开头、
+增加并发/幂等/历史保留边界来绕过。无法写出两个用户可观察结果差异的主题只能保留一条；
+需要更多容量时换业务主题或换仓库。
+
 `scripts/s11_policy.py` 统一校验五类名称；topic map 的 `type_policy` 默认 `capacity-first`，只有用户明确要求固定比例时才设 `strict-ratio`。`allocate_counts` 保留最大余数法作为建议；计划、建仓和交接遵守同一策略。需求模式按实际题位数均匀铺开，每模式不超过 3；有足够题位时覆盖全部 12 个可用模式。
 
 2026-11-16 起，新批次必须填写 `difficulty_contract_version: 3`，并为每个
@@ -194,7 +212,7 @@ python3 <skill>/scripts/create_source_snapshot.py \
 容量沿用语义题位、主体/模式护栏和单仓上限 50、每模式 3；源码派生有 warning 就先修扫描，不猜容量。新主体仅功能开发可用，并遵守原来的限流、跨域和台账规则。扩容只向最大 sequence 后追加；旧序号、类型、topic、family、angle 和仓库保持原样，追加默认保持容量优先；只有显式 strict-ratio 才核对整体比例。不要重排历史题。
 
 ```bash
-python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map.json --repo <源仓库> --expected-base-commit <SHA> --require-domain-fit --require-difficulty-design
+python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map.json --repo <源仓库> --expected-base-commit <SHA> --require-domain-fit --require-difficulty-design --require-semantic-dedup
 python3 <skill>/scripts/check_prompt_type_intent.py --parent <batch目录> --json
 python3 <skill>/scripts/domain_fit.py --parent <batch目录> --repo <源仓库>
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123 --dry-run

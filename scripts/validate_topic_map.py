@@ -18,6 +18,7 @@ from s11_policy import validate_plan
 import domain_fit
 import difficulty_contract
 import check_prompt_type_intent
+import semantic_dedup
 
 
 def main() -> None:
@@ -31,6 +32,11 @@ def main() -> None:
         "--require-difficulty-design",
         action="store_true",
         help="核对每题 H1/H2/H3 困难设计与跨模块源码依据",
+    )
+    parser.add_argument(
+        "--require-semantic-dedup",
+        action="store_true",
+        help="要求新批次提供 semantic_identity 和同 topic 对比契约",
     )
     args = parser.parse_args()
 
@@ -60,6 +66,12 @@ def main() -> None:
             )
             if errors:
                 raise TopicMapError("；".join(errors))
+        semantic_errors = semantic_dedup.map_errors(
+            topic_map,
+            require=args.require_semantic_dedup,
+        )
+        if semantic_errors:
+            raise TopicMapError("；".join(semantic_errors))
     except (TopicMapError, ValueError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         raise SystemExit(1) from None
@@ -74,6 +86,7 @@ def main() -> None:
         "version": topic_map.get("version"),
         "base_commit": topic_map.get("base_commit"),
         "max_capacity": topic_map.get("max_capacity"),
+        "dedup_contract_version": topic_map.get("dedup_contract_version"),
         "topic_count": len(topic_map.get("topics", [])),
         "topic_slots": topic_slots(topic_map),
         "task_plan_count": len(topic_map.get("task_plan", [])),

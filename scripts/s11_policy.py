@@ -62,4 +62,15 @@ def validate_plan(topic_map):
         if seats[item["topic"]] > topic["seat_capacity"]:
             raise ValueError(f"topic {item['topic']} 超过 seat_capacity")
         counts[expected] += 1
-    return validate_type_counts(counts, len(plan), policy=topic_map.get("type_policy", "capacity-first"))
+    validated = validate_type_counts(
+        counts,
+        len(plan),
+        policy=topic_map.get("type_policy", "capacity-first"),
+    )
+    if topic_map.get("dedup_contract_version") is not None:
+        import semantic_dedup
+
+        errors = semantic_dedup.map_errors(topic_map)
+        if errors:
+            raise ValueError("语义查重契约未通过：" + "；".join(errors))
+    return validated

@@ -238,6 +238,78 @@ class OpportunityMapTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def enable_semantic_contract(self):
+        self.topic_map["dedup_contract_version"] = 1
+        plans = self.topic_map["task_plan"]
+        self.topic_map["topics"] = [
+            {
+                "id": f"topic-{index}",
+                "name": f"主题 {index}",
+                "keywords": [f"主题{index}"],
+                "evidence": ["src/orders.py"],
+                "seat_capacity": 2,
+            }
+            for index in range(18)
+        ]
+        for index, plan in enumerate(plans):
+            operation = "create" if index < 18 else "update"
+            plan["semantic_identity"] = {
+                "version": 1,
+                "object_key": plan["topic"],
+                "operation_key": operation,
+                "outcome_keys": [
+                    f"outcome_{index}_primary",
+                    f"outcome_{index}_secondary",
+                ],
+                "artifact_keys": [f"artifact_{index}"],
+                "acceptance_entities": [f"ACPT-{index + 1:03d}"],
+            }
+            plan["semantic_contrast"] = []
+            if index >= 18:
+                peer = index - 18
+                plan["semantic_contrast"] = [{
+                    "peer_sequence": peer + 1,
+                    "differences": [
+                        {
+                            "dimension": "operation",
+                            "self": f"更新既有对象 {index + 1}",
+                            "peer": f"新增对象 {peer + 1}",
+                        },
+                        {
+                            "dimension": "observable_result",
+                            "self": f"更新后结果 ACPT-{index + 1:03d}",
+                            "peer": f"新增结果 ACPT-{peer + 1:03d}",
+                        },
+                    ],
+                }]
+        self.map_path.write_text(
+            json.dumps(self.topic_map, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self.git("add", "-A")
+        self.git(
+            "-c", "user.name=Test",
+            "-c", "user.email=test@example.invalid",
+            "-c", "commit.gpgsign=false",
+            "commit", "-q", "-m", "semantic-map",
+        )
+        self.head = self.git("rev-parse", "HEAD")
+        self.payload["source_commit"] = self.head
+        self.payload["source_base_commit"] = self.base
+        self.payload["repo_topic_map_sha256"] = hashlib.sha256(
+            self.map_path.read_bytes()
+        ).hexdigest()
+        self.payload["dedup_contract_version"] = 1
+        selected = [
+            item for item in self.payload["opportunities"]
+            if item.get("status") == "selected"
+        ]
+        for item in selected:
+            plan = plans[item["sequence"] - 1]
+            item["semantic_identity"] = plan["semantic_identity"]
+            item["semantic_contrast"] = plan["semantic_contrast"]
+        self.write_payload()
+
     def test_valid_external_map(self):
         result = opportunities.check(self.repo, self.map_path, self.opportunity_path)
         self.assertTrue(result["ok"], result)
@@ -315,6 +387,24 @@ class OpportunityMapTest(unittest.TestCase):
         self.assertEqual(
             result["repo_topic_map_sha256"],
             hashlib.sha256(self.map_path.read_bytes()).hexdigest(),
+        )
+
+    def test_semantic_contract_is_cross_checked_before_handoff(self):
+        self.enable_semantic_contract()
+        result = opportunities.check(self.repo, self.map_path, self.opportunity_path)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["dedup_contract_version"], 1)
+
+        selected = [
+            item for item in self.payload["opportunities"]
+            if item.get("status") == "selected"
+        ]
+        selected[0]["semantic_identity"] = selected[18]["semantic_identity"]
+        self.write_payload()
+        result = opportunities.check(self.repo, self.map_path, self.opportunity_path)
+        self.assertFalse(result["ok"])
+        self.assertTrue(
+            any("semantic_identity 与 map 不一致" in error for error in result["errors"])
         )
 
     def test_handoff_revalidates_workbook_and_external_map(self):

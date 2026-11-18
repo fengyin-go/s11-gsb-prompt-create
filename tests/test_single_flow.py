@@ -61,12 +61,21 @@ class SingleFlow(unittest.TestCase):
         self.remote_repos = {}
         self.topic = {"version": 1, "profile": "gsb-semantic-v2", "base_commit": self.commit,
                       "domain": "数据工程", "subdirection": "其他",
-                      "difficulty_contract_version": 3,
+                      "difficulty_contract_version": 3, "dedup_contract_version": 1,
                       "max_capacity": 1, "topics": [{"id": "orders", "name": "订单", "module": "orders",
                         "keywords": ["订单", "订单项"], "evidence": ["src/orders.py"],
                         "domain_objects": ["订单"], "domain_results": ["导出"], "seat_capacity": 1}],
                       "task_plan": [{"sequence": 1, "slug": "development", "task_type": "功能开发",
                                      "topic": "orders", "family": "新增能力", "angle": "订单导出",
+                                     "semantic_identity": {
+                                         "version": 1,
+                                         "object_key": "orders",
+                                         "operation_key": "export",
+                                         "outcome_keys": ["order_dataset", "traceable_export"],
+                                         "artifact_keys": ["order_dataset"],
+                                         "acceptance_entities": ["订单数据集"],
+                                     },
+                                     "semantic_contrast": [],
                                      "difficulty_design": {
                                          "version": 3,
                                          "reasoning_challenge": {

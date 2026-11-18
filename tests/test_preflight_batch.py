@@ -105,12 +105,20 @@ class AggregatePreflightTest(unittest.TestCase):
                 }],
             },
             "dedup": {
-                "violations": [{
-                    "kind": "semantic_similarity",
-                    "score": 0.4,
-                    "left": f"{folder}[功能开发]",
-                    "right": "cc1-02-bugfix[Bugfix]",
-                }],
+                "violations": [
+                    {
+                        "kind": "semantic_similarity",
+                        "score": 0.4,
+                        "left": f"{folder}[功能开发]",
+                        "right": "cc1-02-bugfix[Bugfix]",
+                    },
+                    {
+                        "kind": "semantic_identity_collision",
+                        "score": 5,
+                        "left": folder,
+                        "right": "cc1-02-bugfix",
+                    },
+                ],
             },
         }
 
@@ -134,6 +142,7 @@ class AggregatePreflightTest(unittest.TestCase):
             "difficulty_contract",
             "theme",
             "structural_difficulty",
+            "semantic_intent",
             "batch_dedup",
             "g16",
             "g16_strict",

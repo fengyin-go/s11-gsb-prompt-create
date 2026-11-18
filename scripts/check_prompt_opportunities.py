@@ -18,6 +18,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import check_repo_theme
+import semantic_dedup
 
 VERSION = 1
 RESERVE_PER_MODE = 1
@@ -197,6 +198,18 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
         errors.append("repo_topic_map_sha256 与当前 topic map 不一致")
     if payload.get("schema_version") != VERSION:
         errors.append(f"schema_version 必须为 {VERSION}")
+    contract_version = topic_map.get("dedup_contract_version")
+    semantic_contract = contract_version is not None
+    if semantic_contract:
+        errors.extend(semantic_dedup.map_errors(topic_map, require=True))
+        try:
+            payload_contract = int(payload.get("dedup_contract_version"))
+        except (TypeError, ValueError):
+            payload_contract = 0
+        if payload_contract != int(contract_version):
+            errors.append(
+                "dedup_contract_version 必须与 repo-topic-map.json 一致"
+            )
 
     raw_plans = [
         plan for plan in topic_map.get("task_plan", [])
@@ -279,6 +292,15 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
         for key in ("task_type", "family"):
             if _text(item.get(key)) != _text(plan.get(key)):
                 errors.append(f"selected sequence={sequence} {key} 与 map 不一致")
+        if semantic_contract:
+            if item.get("semantic_identity") != plan.get("semantic_identity"):
+                errors.append(
+                    f"selected sequence={sequence} semantic_identity 与 map 不一致"
+                )
+            if item.get("semantic_contrast", []) != plan.get("semantic_contrast", []):
+                errors.append(
+                    f"selected sequence={sequence} semantic_contrast 与 map 不一致"
+                )
         mode = _text(item.get("demand_mode"))
         if mode not in check_repo_theme.DEMAND_MODE_LEXICON or mode == "代码理解":
             errors.append(f"selected sequence={sequence} demand_mode 不可用：{mode or '空'}")
@@ -337,6 +359,7 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
         "repo_topic_map_sha256": _sha(map_path),
         "source_commit": head.stdout.strip(),
         "source_base_commit": topic_map.get("base_commit"),
+        "dedup_contract_version": topic_map.get("dedup_contract_version"),
         "target_count": target_count,
         "selection_policy": selection_policy,
         "selected_count": len(selected),

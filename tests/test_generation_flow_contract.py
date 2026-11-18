@@ -15,6 +15,9 @@ def test_semantic_topic_map_example_tracks_current_contract() -> None:
         encoding="utf-8"
     )
     assert '"workload_design"' in example
+    assert '"dedup_contract_version": 1' in example
+    assert '"semantic_identity"' in example
+    assert '"semantic_contrast"' in example
     for guard in H3_FALSE_GUARDS:
         assert f'"{guard}"' in example
 
