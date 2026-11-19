@@ -579,7 +579,12 @@ def update_many(parent, candidates, *, repo=None, topic_map=None, opportunity_ma
         seen.add(name)
         row=by_name[name]
         if item.get('task_type',row['任务类型']) != row['任务类型']:raise SystemExit('批量更新不能改变冻结题型')
-        row.update(提示词=item['prompt'],状态='已生成',更新时间=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        row.update(
+            提示词=item['prompt'],
+            提示词类型=row.get('提示词类型') or '主提示词',
+            状态='已生成',
+            更新时间=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        )
         if 'note' in item:row['备注']=item['note']
     repo=repo or detect_repo(parent)
     opportunity = _validate_opportunity_map(

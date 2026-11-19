@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 
-STYLE_GATE_VERSION = 4
+STYLE_GATE_VERSION = 6
 
 # These phrases describe the act of asking for a task rather than the task itself.
 # Keep business time language such as "本次结算周期" untouched.
@@ -87,6 +87,12 @@ def prompt_errors(records: list[dict[str, Any]]) -> list[str]:
         if not prompt:
             continue
         label = _text(record.get("子文件夹名称")) or "未命名"
+        if "`" in prompt or "｀" in prompt:
+            errors.append(f"{label} 题面使用了反引号，请直接保留字段、表名或命令的原文")
+        if "水位" in prompt:
+            errors.append(
+                f'{label} 题面使用了“水位”，请说明具体的日志位置、提交记录或采集截止点'
+            )
         for kind, phrase in frame_hits(prompt):
             if kind == "显式委托设计取舍":
                 errors.append(

@@ -102,6 +102,16 @@ class PromptStyleTest(unittest.TestCase):
                     for error in prompt_style.prompt_errors([self.record(phrase)])
                 ))
 
+    def test_rejects_backticks_and_preserves_business_punctuation(self):
+        plain = "核对 orders_repair（sales.orders），只显示 amount >= 7 的记录。"
+        self.assertEqual(prompt_style.prompt_errors([self.record(plain)]), [])
+        for code in ("`orders_repair`", r"\`orders_repair\`", "```\norders_repair\n```", "｀orders_repair｀"):
+            with self.subTest(code=code):
+                prompt = plain.replace("orders_repair", code)
+                self.assertTrue(any(
+                    "反引号" in error for error in prompt_style.prompt_errors([self.record(prompt)])
+                ))
+
     def test_write_gate_rejects_context_statement(self):
         with tempfile.TemporaryDirectory(prefix="s11-context-style-") as temp:
             with (
