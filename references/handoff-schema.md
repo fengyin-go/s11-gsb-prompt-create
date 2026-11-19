@@ -1,5 +1,8 @@
 # 交接数据
 
+新版交接将 `sequence`、题位图和生成清单的 SHA-256、逐题验收契约摘要及其策略版本一同写入交接摘要。`receipt_version=2` 的生成清单保留跨项目查重结果、使用的平台语料信息和批内 A-5 结果。仍在出题阶段的旧批次，交接前可用 `update-many` 重新生成回执。
+
+
 出题与运行使用同一个 `<root>/batches/<batch>/`。`<root>/_config/settings.json` 由运行侧定位；镜像、Harness、key 文件路径遵守 `s11-feedback-run`，本 skill 不读取或复制 key 原文。
 
 ## 启动证据 startup-preflight.json

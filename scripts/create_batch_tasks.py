@@ -236,6 +236,36 @@ def task_repo_name(base_name, sequence, slug):
     return f"{base_name}-{int(sequence):02d}-{suffix}"
 
 
+@workbook._locked_workbook
+def _seed_task_rows(parent, tasks):
+    path = parent / 'tasks.xlsx'
+    rows = workbook.read_workbook(parent / "tasks.xlsx")
+    by_name = {row["子文件夹名称"]: row for row in rows}
+    if set(by_name) - {t["folder"] for t in tasks}:
+        raise ValueError("工作簿含计划外任务，停止避免丢行")
+    for task in tasks:
+        if task["folder"] not in by_name:
+            number = task.get("number")
+            if number is None:
+                number = int(task["task_id"][4:]) if re.fullmatch(r"s11-\d{6}", task["task_id"]) else task.get("sequence", 0)
+            row = workbook.blank_record({"folder": task["folder"], "task_type": task["task_type"],
+                                         "number": str(number)})
+            rows.append(row)
+        elif by_name[task["folder"]]["任务类型"] != task["task_type"]:
+            raise ValueError("已有工作簿任务类型与计划不一致")
+    if path.exists() and len(rows) == len(by_name):
+        return
+    config_path, config = workbook.load_cross_project_config(parent)
+    if not config_path:
+        workbook.write_workbook(path, rows)
+        return
+    registry = workbook.resolve_config_path(config['registry'], config_path.parent)
+    with workbook.cross_registry_lib.registry_lock(registry):
+        with workbook._workbook_transaction(path, parent=parent, registry=registry) as transaction:
+            workbook.write_workbook(path, rows)
+            workbook._register_workbook(registry, parent, path, rows, transaction)
+
+
 def verify_task(target, entry, *, remote=True, workspace_required=False):
     problems = []
     for legacy in ("originA", "originB", "workspaceA", "workspaceB"):
@@ -374,6 +404,9 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             heads = hub.remote_heads(remote)
             if commit not in heads.values():
                 raise ValueError("最终基准提交没有出现在原始仓库远端分支")
+    if visibility == 'public' and not verify:
+        from baseline_secrets import check_public_commit
+        check_public_commit(source, commit)
     old = read_json(parent / MANIFEST) if (parent / MANIFEST).is_file() else {"tasks": []}
     known = {item["folder"]: item for item in old["tasks"]}
     if not known and len(topic_map["task_plan"]) != int(capacity["capacity"]):
@@ -519,24 +552,13 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             created.append(entry)
         tasks.append(entry)
     if not dry_run and not verify and write_batch_outputs:
-        rows = workbook.read_workbook(parent / "tasks.xlsx")
-        by_name = {row["子文件夹名称"]: row for row in rows}
-        if set(by_name) - {t["folder"] for t in tasks}:
-            raise ValueError("工作簿含计划外任务，停止避免丢行")
-        for task in tasks:
-            if task["folder"] not in by_name:
-                row = workbook.blank_record({"folder": task["folder"], "task_type": task["task_type"],
-                                             "number": str(task.get("number", int(task["task_id"][4:]) if legacy else 0))})
-                rows.append(row)
-            elif by_name[task["folder"]]["任务类型"] != task["task_type"]:
-                raise ValueError("已有工作簿任务类型与计划不一致")
-        workbook.write_workbook(parent / "tasks.xlsx", rows)
+        _seed_task_rows(parent, tasks)
         config = parent / "gsb-cross-project.json"
         if not config.exists():
             registry = Path(os.environ.get("GSB_CROSS_PROJECT_REGISTRY") or
                             SCRIPT_DIR.parent.parent / "gsb-prompt-create/data/cross-project-registry.json")
             save_json(config, {"registry": str(registry), "checker": str(SCRIPT_DIR / "check_cross_project_prompts.py"),
-                      "require_registry": True, "require_coverage": True, "min_peer_batches": 1,
+                      "require_platform_corpus": True, "require_registry": True, "require_coverage": True, "min_peer_batches": 1,
                       "bootstrap_no_history": False, "root_fallback": False})
     return {"ok": not failed, "dry_run": dry_run, "planned_count": len(tasks), "created_count": len(created),
             "skipped_count": len(skipped), "failed_count": len(failed), "failed": failed,

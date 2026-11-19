@@ -40,6 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import batch_prompt_workbook as workbook_lib  # noqa: E402
 from prompt_history_lib import detect_prefix, load_history, strip_legacy_context_boilerplate  # noqa: E402
+import project_review
 import semantic_dedup  # noqa: E402
 
 
@@ -635,7 +636,7 @@ def load_history_prompts(
     """
 
     current_prompts = {prompt.strip() for _, prompt in items}
-    project_paths = {str(parent / label) for label, _ in items} if parent else set()
+    project_paths = {str(parent / label.split('[', 1)[0]) for label, _ in items} if parent else set()
     prefixes = {detect_prefix(label) for label, _ in items}
     prefixes.discard("")
     if not project_paths and not prefixes:
@@ -660,6 +661,7 @@ def check(
     items: list[tuple[str, str]],
     threshold: float,
     semantic_items: dict[str, dict[str, object]] | None = None,
+    project_items: dict | None = None,
 ) -> dict[str, object]:
     texts = [prompt for _, prompt in items]
     business_texts = [strip_scaffolding(text) for text in texts]
@@ -736,6 +738,13 @@ def check(
                 }
                 semantic_collisions.append(collision)
                 violations.append(collision)
+        if (project_items and project_review.same_project(project_items.get(left_label, {}),
+                                                         project_items.get(right_label, {}))):
+            raw = raw_pair_records[-1]['result']
+            evidence = project_review.pair_evidence(left_prompt, right_prompt, raw)
+            raw['violations'] = evidence
+            raw['ok'] = not evidence
+            continue
         left_type = task_type_from_label(left_label)
         right_type = task_type_from_label(right_label)
         if left_type and right_type and left_type != right_type:
@@ -854,7 +863,8 @@ def main() -> None:
     if args.include_history:
         items = items + load_history_prompts(items, parent)
 
-    result = check(items, args.threshold)
+    identities = project_review.bind_project([{'label': label} for label, _ in items], parent) if parent else []
+    result = check(items, args.threshold, project_items={item['label']: item for item in identities})
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result["ok"]:
         sys.exit(1)

@@ -33,7 +33,7 @@ def validate_generation(parent, rows, origin, metadata=None):
     from check_prompt_g16 import check as g16_check
     from repo_topic_policy import load_topic_map
     prompts = [(row["子文件夹名称"], row["任务类型"], row["提示词"]) for row in rows]
-    if not g16_check(prompts)["ok"]:
+    if not g16_check(prompts, batch_dir=parent)["ok"]:
         raise ValueError("整批 G16/G19 难度闸门未通过")
     style_errors = prompt_style.prompt_errors(rows)
     if style_errors:
@@ -131,6 +131,11 @@ def prepare(root, batch, metadata_file):
     if not lib.BATCH_ID_RE.fullmatch(batch):
         raise ValueError("batch 必须为 bMMDD-NN")
     parent = root / "batches" / batch
+    return _prepare_locked(parent, root, batch, metadata_file, lib)
+
+
+@workbook._locked_workbook
+def _prepare_locked(parent, root, batch, metadata_file, lib):
     cfg = lib.settings(root)
     meta = read_json(metadata_file)
     manifest = read_json(parent / MANIFEST)
@@ -171,6 +176,16 @@ def prepare(root, batch, metadata_file):
     common.update(shared_profile['fields'])
     if common.get("domain") != topic_map.get("domain") or common.get("subdirection") != topic_map.get("subdirection"):
         raise ValueError("handoff metadata 的 domain/subdirection 必须与 repo-topic-map.json 一致")
+    receipt_path = parent / workbook.MANIFEST_FILENAME
+    receipt = read_json(receipt_path)
+    cross = receipt.get('cross_project')
+    if not isinstance(cross, dict) or receipt.get('receipt_version') != 2 or any(value is not True for value in (
+            receipt.get('gate_ok'), receipt.get('raw_a5_ok'),
+            cross.get('ok'), cross.get('platform_dedup_ok'),
+            cross.get('platform_corpus_used'))):
+        raise ValueError('交接需要完整的查重回执，请用 update-many 刷新本批生成清单')
+    generation_sha = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    topic_sha = hashlib.sha256((parent / 'repo-topic-map.json').read_bytes()).hexdigest()
     tasks, baselines, staged = [], {}, []
     for entry in entries:
         name = entry["task_id"]
@@ -221,10 +236,13 @@ def prepare(root, batch, metadata_file):
         record.update(common_profile={"path":str(profile_path.relative_to(root)),"sha256":__import__("hashlib").sha256(profile_path.read_bytes()).hexdigest()}, task_id=name, batch=batch, task_type=entry["task_type"], prompt=prompt,
                       difficulty=data.get("difficulty", "困难"), initial_commit=initial, base_commit=initial,
                       task_repo=entry["repo"].split("/", 1)[1], task_repo_full=entry["repo"],
+                      sequence=plan_sequence, contract_binding_version=1,
+                      topic_map_sha256=topic_sha, generation_sha256=generation_sha,
                       handoff_version=2, producer="s11-gsb-prompt-create", execution_mode="single",
                       branch="main", origin=f"{name}/origin", workspace=f"{name}/workspace",
                       domain_contract=domain_contract,
                       domain_gate_version=domain_fit.DOMAIN_GATE_VERSION,
+                      feedback_policy_version=3,
                       review_contract=review_contract_doc,
                       review_contract_sha256=review_contract_hash)
         for key in ("image", "image_id", "harness", "harness_version", "os"):
@@ -254,7 +272,7 @@ def prepare(root, batch, metadata_file):
         baselines[record["baseline_id"]] = baseline
         staged.append((target, record, recording))
     generation_manifest_path = parent / workbook.MANIFEST_FILENAME
-    batch_manifest = {"schema_version": 2, "batch_id": batch, "count": len(tasks), "tasks": tasks, "baselines": baselines,
+    batch_manifest = {"schema_version": 2, "contract_binding_version": 1, "batch_id": batch, "count": len(tasks), "tasks": tasks, "baselines": baselines,
                       "review_contract_required": True,
                       "producer": "s11-gsb-prompt-create", "execution_mode": "single", "branch": "main",
                       "generation_manifest": {

@@ -34,6 +34,7 @@ if str(SOLO_CREATE_SCRIPTS) not in sys.path:
 import batch_prompt_workbook as workbook_lib  # noqa: E402
 import check_prompt_dedup as dedup_lib  # noqa: E402
 import check_repo_theme as theme_lib  # noqa: E402
+import project_review
 import cross_project_cache as cache_lib  # noqa: E402
 import prompt_cross_project_registry as registry_lib  # noqa: E402
 
@@ -304,7 +305,7 @@ def load_workbook_items(path: Path) -> list[dict[str, str]]:
             "task_type": str(record.get("任务类型", "") or ""),
             "prompt": prompt,
         })
-    return items
+    return project_review.bind_project(items, path.parent)
 
 
 def _platform_confirmed_a5_fragments(raw: dict[str, object]) -> list[str]:
@@ -367,7 +368,9 @@ def _platform_confirmed_a5_fragments(raw: dict[str, object]) -> list[str]:
 
 def load_platform_corpus(path: Path) -> tuple[list[dict[str, object]], dict[str, object]]:
     """读取平台题面快照，转成与本地 peer 相同的比较形状。"""
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    import hashlib
+    contents = path.read_bytes()
+    payload = json.loads(contents)
     if not isinstance(payload, dict):
         raise ValueError("平台题面语料顶层必须是对象")
     raw_items = payload.get("items")
@@ -396,6 +399,7 @@ def load_platform_corpus(path: Path) -> tuple[list[dict[str, object]], dict[str,
             "confirmed_a5_fragments": _platform_confirmed_a5_fragments(raw),
         })
     meta = {
+        "sha256": hashlib.sha256(contents).hexdigest(),
         "profile": str(payload.get("profile") or ""),
         "account": str(payload.get("account") or ""),
         "fetched_at": str(payload.get("fetched_at") or ""),
@@ -475,6 +479,10 @@ def compare_platform_prompt(
             "kind": f"platform_{raw_violation['kind']}",
             "message": "完整题面 raw A-5 命中：不剥离标题、领域链、兼容、恢复、同步或跨模块句",
         })
+    if project_review.same_project(candidate, peer):
+        evidence = project_review.pair_evidence(left, right, raw_a5)
+        raw_a5 = {**raw_a5, 'ok': not evidence, 'violations': evidence}
+        violations = evidence
     return {
         "ok": not violations,
         "similarity": round(ratio, 4),
@@ -507,6 +515,8 @@ def check_platform_corpus(
                 "max_similarity": max_similarity,
                 "max_common_fragment": max_common_fragment,
                 "min_common_han": DEFAULT_PLATFORM_MIN_COMMON_HAN,
+                "same_project": project_review.same_project(candidate, peer),
+                "confirmed_fragments": peer.get('confirmed_a5_fragments') or [],
             }
             result = (
                 cache.get("platform-compare", candidate, peer, settings)
@@ -616,6 +626,10 @@ def _compare_for_gate(
         )
         if cache is not None:
             cache.put("local-compare", candidate, peer, compare_settings, result)
+    if project_review.same_project(candidate, peer):
+        evidence = project_review.pair_evidence(str(candidate['prompt']), str(peer['prompt']), raw)
+        raw = {**raw, 'ok': not evidence, 'violations': evidence}
+        result = {**result, 'ok': not evidence, 'violations': evidence}
     return raw, result
 
 
@@ -1006,6 +1020,7 @@ def main() -> None:
             if item["label"] not in set(args.exclude_folder)
         ]
 
+    project_review.bind_project(candidates, batch_dir)
     selected_names = set(args.peer_batch)
     peer_batch_dirs = discover_peer_batches(
         root,
@@ -1184,6 +1199,7 @@ def main() -> None:
             for path in (
                 Path(__file__).resolve(),
                 SCRIPT_DIR / "cross_project_cache.py",
+                SCRIPT_DIR / "project_review.py",
                 SCRIPT_DIR / "check_prompt_dedup.py",
                 SCRIPT_DIR / "check_repo_theme.py",
                 SCRIPT_DIR / "batch_prompt_workbook.py",
@@ -1221,7 +1237,7 @@ def main() -> None:
         except OSError as exc:
             cache.stats["save_error"] = str(exc)
     coverage_ok = not coverage_issues
-    platform_ok = platform_result["ok"] and not platform_issues
+    platform_ok = platform_result["ok"] and not platform_issues and (platform_corpus_used or not args.require_platform_corpus)
     forbidden_ok = not forbidden_violations
     raw_a5 = dedup_lib.merge_raw_a5_summaries(result, platform_raw_a5)
     final_ok = (

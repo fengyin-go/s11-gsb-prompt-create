@@ -488,13 +488,12 @@ class DifficultyContractTest(unittest.TestCase):
         errors = self.errors(topic)
         self.assertTrue(any("至少要有 4 个工作切片" in error for error in errors))
 
-    def test_workload_floor_rejects_low_expected_calls(self):
+    def test_workload_needs_no_call_estimate(self):
         topic = copy.deepcopy(self.topic)
-        topic["task_plan"][0]["difficulty_design"]["workload_design"][
-            "expected_effective_tool_calls"
-        ] = 42
-        errors = self.errors(topic)
-        self.assertTrue(any("expected_effective_tool_calls" in error for error in errors))
+        workload = topic['task_plan'][0]['difficulty_design']['workload_design']
+        workload.pop('expected_effective_tool_calls', None)
+        workload.pop('call_floor_rationale', None)
+        self.assertEqual(self.errors(topic), [])
 
     def test_source_only_h3_with_equivalent_outcomes_is_rejected(self):
         topic = copy.deepcopy(self.topic)

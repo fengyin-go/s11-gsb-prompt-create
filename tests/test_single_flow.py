@@ -33,6 +33,9 @@ class SingleFlow(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="s11-skill-test-")
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
+        registry_env = patch.dict(os.environ, {'GSB_CROSS_PROJECT_REGISTRY': str(self.base / 'registry.json')})
+        registry_env.start()
+        self.addCleanup(registry_env.stop)
         self.root = self.base / "root"
         self.parent = self.root / "batches/b1111-01"
         self.parent.mkdir(parents=True)
@@ -544,6 +547,36 @@ class SingleFlow(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "立即停止"):
                 create.hub.resolve_repository_owner()
 
+    def test_public_commit_rejects_removed_secret_in_history(self):
+        from baseline_secrets import check_public_commit
+        token = 'ghp_' + 'q' * 36
+        file = self.source / 'example.txt'
+        file.write_text(token)
+        sh(self.source, 'add', file.name)
+        sh(self.source, 'commit', '-qm', 'add test fixture')
+        sh(self.source, 'rm', file.name)
+        sh(self.source, 'commit', '-qm', 'remove fixture')
+        with self.assertRaisesRegex(ValueError, '疑似凭据') as error:
+            check_public_commit(self.source, sh(self.source, 'rev-parse', 'HEAD'))
+        self.assertNotIn(token, str(error.exception))
+        check_public_commit(self.source, self.commit)
+
+    def test_interrupted_workbook_writer_restores_previous_files(self):
+        path = self.parent / 'tasks.xlsx'
+        manifest = self.parent / workbook.MANIFEST_FILENAME
+        path.write_bytes(b'old workbook')
+        manifest.write_bytes(b'old receipt')
+        program = ('import os, sys; from pathlib import Path; '
+                   'import batch_prompt_workbook as w; p=Path(sys.argv[1]); '
+                   'tx=w._workbook_transaction(p); tx.__enter__(); '
+                   'p.write_bytes(b"incomplete"); os._exit(1)')
+        result = subprocess.run([sys.executable, '-c', program, str(path)], cwd=SCRIPTS)
+        self.assertEqual(result.returncode, 1)
+        inspect = workbook._locked_workbook(lambda parent: path.read_bytes())
+        self.assertEqual(inspect(self.parent), b'old workbook')
+        self.assertEqual(manifest.read_bytes(), b'old receipt')
+        self.assertFalse((self.parent / '.workbook-rollback.json').exists())
+
     def test_real_clones_handoff_and_main_advance(self):
         self.topic["task_plan"][0].update(
             task_type="功能优化",
@@ -584,7 +617,8 @@ class SingleFlow(unittest.TestCase):
         create.save_json(self.parent / "handoff-metadata.json", metadata)
         create.save_json(self.parent / workbook.MANIFEST_FILENAME, {
             "workbook": str(self.parent / "tasks.xlsx"),
-            "workbook_sha256": "test-fixture",
+            "workbook_sha256": "test-fixture", "receipt_version": 2, "gate_ok": True, "raw_a5_ok": True,
+            "cross_project": {"ok": True, "platform_dedup_ok": True, "platform_corpus_used": True},
             "prompt_opportunities": {"ok": True},
         })
         with patch.object(handoff, "validate_generation"), \
@@ -616,6 +650,12 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(sh(task / "origin", "rev-parse", "HEAD"), self.commit)
         self.assertEqual(set(self.fake_heads(record["publish"]["repo_url"])), {"main"})
         self.assertEqual(lib.load_task(task)["initial_commit"], self.commit)
+        for file in (self.parent / 'repo-topic-map.json', self.parent / workbook.MANIFEST_FILENAME):
+            original = file.read_bytes()
+            file.write_bytes(original + b' ')
+            with self.assertRaisesRegex(lib.FbrError, '冻结交接'):
+                lib.load_task(task)
+            file.write_bytes(original)
         (task / "originB").mkdir()
         with self.assertRaisesRegex(lib.FbrError, "A/B"):
             lib.load_task(task)

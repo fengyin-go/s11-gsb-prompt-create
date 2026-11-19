@@ -95,6 +95,9 @@ def _load_judge():
     return module, judge_path
 
 
+import project_review
+
+
 JUDGE, JUDGE_PATH = _load_judge()
 
 DEFAULT_WORKBOOK = "tasks.xlsx"
@@ -539,11 +542,17 @@ def check(
     *,
     strict: bool = False,
     notes_can_override: bool = False,
+    batch_dir: Path | None = None,
 ) -> dict:
     justifications = justifications or {}
     rows: list[dict] = []
     violations: list[dict] = []
     justified: list[dict] = []
+    base_commit = None
+    if batch_dir and (batch_dir / 'final-prompt-reviews').is_dir():
+        manifest = batch_dir / 's11-task-repos.json'
+        if manifest.is_file():
+            base_commit = json.loads(manifest.read_text(encoding='utf-8')).get('base_commit')
     for label, task_type, text in items:
         verdict = evaluate(text, task_type)
         row = {"label": label, "task_type": task_type, "prompt": text, **verdict}
@@ -551,16 +560,35 @@ def check(
         # `--strict` 另外把 hint 当不合格，hint 里包含「单一功能模块」、一般
         # 「G19 疑似不达中等」与「硬证据只在末句」三类。
         kinds: list[str] = []
-        if not row["g16_ok"]:
-            kinds.append("G16")
-        if row.get("g19_hard_block"):
-            kinds.append("G19")
-        if strict and row["hints"]:
-            kinds.append("strict")
+        card = None
+        if (base_commit and Path(label).name == label and not row.get('platform_learned_blocks')
+                and not row.get('g19_hard_block') and (not row['g16_ok'] or (strict and row['hints']))):
+            receipt = batch_dir / 'final-prompt-reviews' / (label + '.json')
+            try:
+                card = json.loads(receipt.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                pass
+        reviewed = bool(card) and not project_review.final_review_errors(text.strip(), base_commit, card)
+        if reviewed:
+            row['independent_review_supported'] = True
+        if not row['g16_ok'] and not reviewed:
+            kinds.append('G16')
+        if row.get('g19_hard_block'):
+            kinds.append('G19')
+        strict_hints = row['hints']
+        if strict and card:
+            # A bound H2 finding can resolve only a module-count hint. The G19
+            # lexical approximation needs all three axes; unrelated hints remain.
+            module_reviewed = not project_review.final_review_errors(text.strip(), base_commit, card, axes=('H2',))
+            strict_hints = [hint for hint in strict_hints
+                            if not (module_reviewed and hint.startswith(('只读到一个功能模块', '多模块整合只由')))
+                            and not (reviewed and hint.startswith('疑似不达 G19 中等下限'))]
+        if strict and strict_hints:
+            kinds.append('strict')
         row["violation_kinds"] = kinds
         row["gate_ok"] = not kinds
         if "strict" in kinds:
-            row["reasons"] = list(row["reasons"]) + list(row["hints"])
+            row["reasons"] = list(row["reasons"]) + list(strict_hints)
         rows.append(row)
         if kinds:
             # G16 违规按类型要求项数（普通 2、Bugfix 3）；纯 strict 违规写两项即可。
@@ -742,7 +770,7 @@ def main() -> None:
     else:
         raise SystemExit("必须提供 --parent 或 --prompts-file 之一")
 
-    result = check(items, justifications, strict=args.strict)
+    result = check(items, justifications, strict=args.strict, batch_dir=parent if args.parent and not args.prompts_file else None)
     if args.quiet:
         def _compact(row: dict) -> dict:
             return {

@@ -26,6 +26,7 @@ the implementer to choose.
 from __future__ import annotations
 
 import argparse
+import project_review
 import itertools
 import json
 import re
@@ -40,7 +41,6 @@ if str(SCRIPT_DIR) not in sys.path:
 
 CONTRACT_VERSION = 3
 WORKLOAD_CONTRACT_VERSION = 1
-MIN_EXPECTED_EFFECTIVE_TOOL_CALLS = 55
 MIN_WORKLOAD_SLICES = 4
 MIN_VERIFICATION_PATHS = 2
 FOLDER_PLAN_RE = re.compile(
@@ -426,25 +426,11 @@ def _design_errors(
 
     workload = design.get("workload_design")
     if not isinstance(workload, dict):
-        errors.append(f"{where} 缺少 workload_design；P6 低调用量题不能进入正式交接")
+        errors.append(f"{where} 缺少 workload_design；需登记工作切片和验证路径")
         workload = {}
     if workload.get("version") != WORKLOAD_CONTRACT_VERSION:
         errors.append(
             f"{where} 的 workload_design.version 必须是 {WORKLOAD_CONTRACT_VERSION}"
-        )
-    expected_calls = workload.get("expected_effective_tool_calls")
-    if (
-        type(expected_calls) is not int
-        or expected_calls < MIN_EXPECTED_EFFECTIVE_TOOL_CALLS
-    ):
-        errors.append(
-            f"{where} 的 workload_design.expected_effective_tool_calls "
-            f"必须为不小于 {MIN_EXPECTED_EFFECTIVE_TOOL_CALLS} 的整数"
-        )
-    if len(_text(workload.get("call_floor_rationale"))) < 12:
-        errors.append(
-            f"{where} 的 workload_design.call_floor_rationale "
-            "必须说明为什么至少需要这些工具调用，不能只填数字"
         )
     slices = workload.get("work_slices")
     if not isinstance(slices, list) or len(slices) < MIN_WORKLOAD_SLICES:
@@ -806,6 +792,10 @@ def prompt_errors(
             continue
         seen.add(sequence)
         plan = plans[sequence]
+        if topic_map.get('final_review_version') == 1:
+            errors.extend(f'{folder}：{message}' for message in project_review.final_review_errors(
+                prompt, topic_map.get('base_commit', ''), plan.get('final_prompt_review')))
+
         if _text(record.get("任务类型")) != _text(plan.get("task_type")):
             errors.append(f"{folder} 的任务类型与 task_plan sequence {sequence} 不一致")
         errors.extend(

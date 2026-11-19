@@ -246,12 +246,13 @@ def _collect_g16(
     justifications: dict[str, str],
     *,
     strict: bool,
+    batch_dir: Path | None = None,
 ) -> dict[str, Any]:
     result = check_prompt_g16.check(
         items,
         justifications,
         strict=strict,
-        notes_can_override=False,
+        notes_can_override=False, batch_dir=batch_dir,
     )
     rule = "g16_strict" if strict else "g16"
     for item in result.get("items") or []:
@@ -433,8 +434,8 @@ def check(
         )
     }
     try:
-        g16 = _collect_g16(collector, items, justifications, strict=False)
-        g16_strict = _collect_g16(collector, items, justifications, strict=True)
+        g16 = _collect_g16(collector, items, justifications, strict=False, batch_dir=parent)
+        g16_strict = _collect_g16(collector, items, justifications, strict=True, batch_dir=parent)
     except Exception as exc:  # noqa: BLE001 - keep other independent gates running.
         g16 = {"ok": False, "error": str(exc)}
         g16_strict = {"ok": False, "error": str(exc)}

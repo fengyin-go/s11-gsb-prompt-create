@@ -28,7 +28,7 @@ def check(candidate: dict, repo: Path) -> dict:
         "naturalness": check_prompt_naturalness.check(rows)["errors"],
         "type_intent": check_prompt_type_intent.prompt_errors(rows, topic_map),
         "domain": domain_fit.map_errors(topic_map, repo) + domain_fit.prompt_errors(rows, topic_map),
-        "difficulty": difficulty_contract.prompt_errors(rows, topic_map, repo),
+        "difficulty": difficulty_contract.prompt_errors(rows, {**topic_map, "final_review_version": 1}, repo),
     }
     return {
         "ok": all(not errors for errors in stages.values()),

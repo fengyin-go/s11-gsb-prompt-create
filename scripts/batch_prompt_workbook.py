@@ -4,11 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import os
+import tempfile
+from functools import wraps
+from contextlib import contextmanager
 import hashlib
+import inspect
 import json
 import re
 import subprocess
 import sys
+import uuid
 import zipfile
 from contextlib import ExitStack
 from datetime import datetime, timezone
@@ -181,9 +188,16 @@ def write_workbook(path: Path, records: list[dict[str, str]]) -> None:
 </cp:coreProperties>''',
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for name, content in files.items():
-            zf.writestr(name, content)
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+        try:
+            with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for name, content in files.items():
+                    zf.writestr(name, content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            os.replace(temporary.name, path)
+        finally:
+            Path(temporary.name).unlink(missing_ok=True)
 
 
 def workbook_path(parent: Path, workbook: str | None) -> Path:
@@ -469,6 +483,87 @@ def _validate_opportunity_map(repo: Path | None, topic_map: str | Path | None,
     return result
 
 
+def _atomic_bytes(path, content):
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.' + path.name)
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def _recover_workbook(parent, journal, registry, requested_book):
+    snapshot = json.loads(journal.read_text())
+    book = Path(snapshot['workbook'])
+    if not book.is_relative_to(parent) and book != requested_book:
+        raise ValueError('请用上次指定的工作簿路径恢复被中断的写入')
+    if registry:
+        entry = cross_registry_lib.load_registry(registry)['entries'].get(str(book), {})
+        if entry.get('transaction') == snapshot['transaction']:
+            if not book.is_file() or entry.get('workbook_sha256') != cross_registry_lib.sha256_file(book):
+                raise ValueError('已登记的工作簿被改动，请核对后恢复')
+            journal.unlink()
+            return
+    for name, target in [('workbook', book), ('manifest', parent / MANIFEST_FILENAME)]:
+        encoded = snapshot['backups'][name]
+        if encoded is None:
+            target.unlink(missing_ok=True)
+        else:
+            _atomic_bytes(target, base64.b64decode(encoded, validate=True))
+    journal.unlink()
+
+
+def _locked_workbook(function):
+    @wraps(function)
+    def locked(parent, *args, **kwargs):
+        parent = Path(parent).resolve()
+        with cross_registry_lib.registry_lock(parent / '.workbook-update'):
+            journal = parent / '.workbook-rollback.json'
+            if journal.exists():
+                bound = inspect.signature(function).bind(parent, *args, **kwargs)
+                requested = workbook_path(parent, bound.arguments.get('workbook')).resolve()
+                config_path, config = load_cross_project_config(parent)
+                registry = resolve_config_path(config['registry'], config_path.parent) if config_path else None
+                with ExitStack() as locks:
+                    if registry:
+                        locks.enter_context(cross_registry_lib.registry_lock(registry))
+                    _recover_workbook(parent, journal, registry, requested)
+            return function(parent, *args, **kwargs)
+    return locked
+
+
+@contextmanager
+def _workbook_transaction(path, *, parent=None, registry=None):
+    path = path.resolve()
+    parent = parent or path.parent
+    journal = parent / '.workbook-rollback.json'
+    targets = {'workbook': path, 'manifest': parent / MANIFEST_FILENAME}
+    backups = {key: base64.b64encode(target.read_bytes()).decode() if target.exists() else None
+               for key, target in targets.items()}
+    transaction = uuid.uuid4().hex
+    _atomic_bytes(journal, json.dumps({'workbook': str(path), 'backups': backups,
+                                       'transaction': transaction}).encode())
+    try:
+        yield transaction
+    except BaseException:
+        _recover_workbook(parent, journal, registry, path)
+        raise
+    journal.unlink()
+
+
+def _register_workbook(registry, parent, path, records, transaction):
+    prompt_count = sum(bool(row.get('提示词', '').strip()) for row in records)
+    payload = cross_registry_lib.load_registry(registry)
+    cross_registry_lib.upsert_entry(payload, path, batch_id=parent.name, batch_dir=parent,
+        status='finalized' if prompt_count else 'empty', prompt_count=prompt_count,
+        extra={'row_count': len(records), 'transaction': transaction})
+    cross_registry_lib.save_registry(registry, payload)
+
+
+@_locked_workbook
 def update_many(parent, candidates, *, repo=None, topic_map=None, opportunity_map=None,
                 require_topic_map=True):
     """Validate full candidate batch once and commit workbook/registry together under the registry lock."""
@@ -499,27 +594,16 @@ def update_many(parent, candidates, *, repo=None, topic_map=None, opportunity_ma
     registry=resolve_config_path(cfg['registry'],cfg_path.parent)
     # Batch shape/count checks run once; per-prompt admission and all-pair comparisons remain included.
     with cross_registry_lib.registry_lock(registry,timeout_seconds=float(cfg.get('lock_timeout_seconds') or 120)):
-        gate=run_write_gates(parent,records,repo=repo,topic_map=topic,max_per_mode=3)
-        difficulty=check_g16([(r['子文件夹名称'],r['任务类型'],r['提示词']) for r in records])
+        gate=run_write_gates(parent,records,repo=repo,topic_map=topic,max_per_mode=3, review_folders=seen)
+        difficulty=check_g16([(r['子文件夹名称'],r['任务类型'],r['提示词']) for r in records], batch_dir=parent)
         if not gate['ok'] or not difficulty['ok']:raise SystemExit('整批主题/难度/去重未通过：'+json.dumps({'gate':gate,'difficulty':difficulty},ensure_ascii=False))
         cross=run_cross_project_batch_gate(parent,cfg_path,cfg,records)
-        original=path.read_bytes()
-        try:
-            write_workbook(path,records)
-            payload=cross_registry_lib.load_registry(registry)
-            cross_registry_lib.upsert_entry(payload,path,batch_id=parent.name,batch_dir=parent,status='finalized',prompt_count=sum(bool(r['提示词']) for r in records),extra={'row_count':len(records)})
-            cross_registry_lib.save_registry(registry,payload)
-            manifest = write_generation_manifest(
-                parent,
-                workbook=path,
-                repo=repo,
-                gate=gate,
-                skill={},
-                opportunity=opportunity,
-            )
-        except Exception:
-            path.write_bytes(original)
-            raise
+        gate["cross_project"] = cross
+        with _workbook_transaction(path, parent=parent, registry=registry) as transaction:
+            write_workbook(path, records)
+            manifest = write_generation_manifest(parent, workbook=path, repo=repo, gate=gate,
+                                                 skill={}, opportunity=opportunity)
+            _register_workbook(registry, parent, path, records, transaction)
     return {
         'ok': True,
         'updated': len(seen),
@@ -543,6 +627,7 @@ def run_write_gates(
     invented_blacklist: set[str] | None = None,
     invented_limit: int | None = None,
     topic_map: dict | None = None,
+    review_folders: set[str] | None = None,
 ) -> dict:
     """写表前的三道闸：同仓库主题去重、难度下限、提示词查重。
 
@@ -621,6 +706,25 @@ def run_write_gates(
     difficulty_contract_errors = (
         difficulty_contract.prompt_errors(records, topic_map, repo) if topic_map else []
     )
+    previous = parent / MANIFEST_FILENAME
+    if topic_map and previous.is_file():
+        saved = json.loads(previous.read_text(encoding="utf-8"))
+        review_folders = set(review_folders or ()) | set(saved.get("reviewed_prompt_folders", []))
+    if topic_map and review_folders:
+        import project_review
+        for record in records:
+            name = record['子文件夹名称']
+            if name in review_folders:
+                receipt = parent / 'final-prompt-reviews' / (name + '.json')
+                try:
+                    review = json.loads(receipt.read_text(encoding='utf-8')) if receipt.is_file() else None
+                except (OSError, ValueError) as exc:
+                    difficulty_contract_errors.append(f'{name}：重建无法读取的最终题面复核文件 {receipt.name}（{exc}）')
+                    continue
+                difficulty_errors_for_row = project_review.final_review_errors(
+                    record['提示词'].strip(), topic_map.get('base_commit', ''), review)
+                difficulty_contract_errors.extend(f'{name}：{msg}' for msg in difficulty_errors_for_row)
+
     semantic_prompt_errors = (
         semantic_dedup.prompt_errors(records, topic_map) if topic_map else []
     )
@@ -672,7 +776,10 @@ def run_write_gates(
         if topic_map
         else {}
     )
-    dedup = dedup_check(items, 0.2, semantic_items=semantic_items)
+    import project_review
+    project_items = project_review.bind_project([{'label': label} for label, _ in items], parent)
+    dedup = dedup_check(items, 0.2, semantic_items=semantic_items,
+                        project_items={item['label']: item for item in project_items})
 
     problems: list[str] = []
     problems += [f"题面表达未通过：{error}" for error in style_errors]
@@ -732,6 +839,7 @@ def run_write_gates(
     return {
         "ok": not problems,
         "gate_version": GATE_VERSION,
+        "reviewed_prompt_folders": sorted(review_folders or []),
         "problems": problems,
         "domain": {
             "ok": not domain_errors,
@@ -838,9 +946,11 @@ def write_generation_manifest(
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "workbook": str(workbook),
         "workbook_sha256": hashlib.sha256(workbook.read_bytes()).hexdigest(),
+        "receipt_version": 2,
         "repo": str(repo) if repo else "",
         "gate_version": gate.get("gate_version"),
         "gate_ok": gate.get("ok"),
+        "reviewed_prompt_folders": gate.get("reviewed_prompt_folders", []),
         "module_counts": (gate.get("theme") or {}).get("module_counts"),
         "topic_policy": (gate.get("theme") or {}).get("topic_policy"),
         "topic_counts": (gate.get("theme") or {}).get("topic_counts"),
@@ -881,6 +991,7 @@ def write_generation_manifest(
     return path
 
 
+@_locked_workbook
 def scan(parent: Path, workbook: str | None) -> dict[str, object]:
     path = workbook_path(parent, workbook)
     records = read_workbook(path)
@@ -903,7 +1014,16 @@ def scan(parent: Path, workbook: str | None) -> dict[str, object]:
             if not existing:
                 records.append(blank_record(parsed))
     pending = sort_pending_for_batch_generation(pending)
-    write_workbook(path, records)
+    if not path.exists() or len(records) != len(by_folder):
+        cfg_path, cfg = load_cross_project_config(parent)
+        registry = resolve_config_path(cfg['registry'], cfg_path.parent) if cfg_path else None
+        with ExitStack() as stack:
+            if registry:
+                stack.enter_context(cross_registry_lib.registry_lock(registry))
+            transaction = stack.enter_context(_workbook_transaction(path, parent=parent, registry=registry))
+            write_workbook(path, records)
+            if registry:
+                _register_workbook(registry, parent, path, records, transaction)
     return {
         "workbook": str(path),
         "discovered_count": len(discovered),
@@ -914,6 +1034,7 @@ def scan(parent: Path, workbook: str | None) -> dict[str, object]:
     }
 
 
+@_locked_workbook
 def update(
     parent: Path,
     workbook: str | None,
@@ -946,7 +1067,7 @@ def update(
         )
         from check_prompt_g16 import check as g16_check
         verdict = g16_check([(folder, parsed["task_type"], prompt)],
-                            {folder: note} if note else {})
+                            {folder: note} if note else {}, batch_dir=parent)
         if not verdict["ok"]:
             raise SystemExit(json.dumps({"ok": False, "blocking_reason": "G16/G19 难度闸门未通过", "g16": verdict}, ensure_ascii=False))
     # 0-1 新主体登记：任务类型里的「功能开发」就是 0-1 功能开发，允许它落在仓库里
@@ -1082,6 +1203,7 @@ def update(
             invented_subjects=invented_subjects,
             invented_limit=invented_limit,
             topic_map=loaded_topic_map,
+            review_folders={folder},
         )
         gate["skill"] = skill
         if not gate["ok"]:
@@ -1101,7 +1223,6 @@ def update(
         tag = f"{GATE_TAG}: {gate.get('gate_version')}；闸门: ok"
         row["备注"] = f"{row.get('备注') or ''}；{tag}".strip("；") if row.get("备注") else tag
 
-    original_bytes: bytes | None = None
     try:
         if cross_config_path and cross_registry_path:
             cross_file_stack.enter_context(cross_registry_lib.registry_lock(
@@ -1109,53 +1230,17 @@ def update(
                 timeout_seconds=float(cross_config.get("lock_timeout_seconds") or 120),
             ))
             if prompt is not None:
-                gate["cross_project"] = run_cross_project_gate(
-                    parent,
-                    cross_config_path,
-                    cross_config,
-                    folder=folder,
-                    task_type=str(row.get("任务类型") or parsed.get("task_type") or ""),
-                    prompt=str(prompt),
-                )
-            original_bytes = path.read_bytes() if path.is_file() else None
+                completed_rows = [record for record in records if record.get('提示词', '').strip()]
+                gate["cross_project"] = run_cross_project_batch_gate(
+                    parent, cross_config_path, cross_config, completed_rows)
 
-        write_workbook(path, records)
-
-        if cross_config_path and cross_registry_path:
-            prompt_count = sum(
-                1 for record in records if str(record.get("提示词") or "").strip()
-            )
-            try:
-                registry_payload = cross_registry_lib.load_registry(cross_registry_path)
-                cross_registry_lib.upsert_entry(
-                    registry_payload,
-                    path,
-                    batch_id=parent.name,
-                    batch_dir=parent,
-                    status="finalized" if prompt_count else "empty",
-                    prompt_count=prompt_count,
-                    extra={"row_count": len(records)},
-                )
-                cross_registry_lib.save_registry(cross_registry_path, registry_payload)
-            except Exception as exc:  # noqa: BLE001 - restore workbook before surfacing.
-                if original_bytes is None:
-                    path.unlink(missing_ok=True)
-                else:
-                    path.write_bytes(original_bytes)
-                raise SystemExit(
-                    "跨项目注册表更新失败，工作簿已回滚："
-                    f"{cross_registry_path}: {exc}"
-                ) from exc
-
-        if prompt is not None:
-            manifest = write_generation_manifest(
-                parent,
-                workbook=path,
-                repo=repo or detect_repo(parent),
-                gate=gate,
-                skill=skill,
-                opportunity=opportunity_result,
-            )
+        with _workbook_transaction(path, parent=parent, registry=cross_registry_path) as transaction:
+            write_workbook(path, records)
+            if prompt is not None:
+                manifest = write_generation_manifest(parent, workbook=path, repo=repo or detect_repo(parent),
+                    gate=gate, skill=skill, opportunity=opportunity_result)
+            if cross_config_path and cross_registry_path:
+                _register_workbook(cross_registry_path, parent, path, records, transaction)
     finally:
         cross_file_stack.close()
 

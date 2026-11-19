@@ -298,7 +298,7 @@ G19 疑似不达中等、硬证据只出现在末句（「主诉求还是列表�
 - `context_anchors` 至少两条，一条 `supports=trigger`，另一条支撑 `option_a` 或
   `option_b`；只指向 `STATUS_ORDER`、函数名或通用 CRUD 代码不算真实取舍依据。
 - `anti_patterns` 的七项必须全为 `false`；`false_h3_guards` 的八项也必须全为 `false`。
-- `workload_design` 必须达到 55 次预期有效调用、4 个工作切片、两个模块和两条验证路径；只写
+- `workload_design` 必须达到 4 个工作切片、两个模块和两条验证路径；只写
   “多写测试”不算工作量设计。
   题面连续出现四个以上“先/再/逐项/依次”等过程词，同时没有开放判断或结果不变量时直接拒绝。
 
@@ -471,3 +471,5 @@ raw A-5、跨项目注册表或其他硬闸。
 `raw_a5_max_internal_repeat_length`、`raw_a5_window_hits`、
 `raw_a5_nearest_pairs` 和最近邻明细。
 任一失败时不得写工作簿；按最近邻逐条写出“入口形态、动作顺序、状态关系、异常反馈”四个差异点后重出。
+
+新题按[独立难度复核与同项目查重](difficulty-hardening.md)生成并验证最终题面。样稿、写表和交接使用同一最终正文。

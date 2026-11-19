@@ -84,8 +84,6 @@
         },
         "workload_design": {
           "version": 1,
-          "expected_effective_tool_calls": 60,
-          "call_floor_rationale": "需要完成订单解析、发布恢复、导出消费和两条独立验证路径",
           "work_slices": [
             {
               "module": "订单解析",
