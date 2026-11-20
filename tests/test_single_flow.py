@@ -233,6 +233,14 @@ class SingleFlow(unittest.TestCase):
                                          ],
                                          "conclusion": "pass",
                                      }}]}
+        self.topic["task_plan"][0]["difficulty_design"]["design_tradeoff"]["path"] = "business"
+        self.topic.update(h3_rule_version=3, final_review_version=2, h3_selection_version=1, h3_candidates=[{
+            'opportunity_id': 'export', 'decision': 'admit', 'task_type': '功能开发',
+            'decision_unit': '同一订单', 'decision_stage': '发布时', 'trigger_input': '两批订单重叠', 'user_action': '按来源核对导出',
+            'remaining_choice': '重叠记录的归属', 'reason': '归属影响按批次对账',
+            'source_anchor': {'path': 'src/orders.py', 'start_line': 2, 'end_line': 2,
+                              'excerpt': '解析订单数据并生成订单数据集'}}])
+        self.topic['task_plan'][0]['opportunity_id'] = 'export'
         create.save_json(self.parent / "repo-topic-map.json", self.topic)
         create.save_json(self.parent / "startup-preflight.json", {"startup_ok": True, "cleaned_up": True,
             "baseline_push_ok": True, "dependency_ignored": True, "dependency_paths": [],
@@ -276,6 +284,23 @@ class SingleFlow(unittest.TestCase):
         return create.create_batch(self.parent, self.source, self.parent / "repo-topic-map.json",
                       preflight=self.parent / "startup-preflight.json", owner="selftest", dry_run=dry)
 
+    def test_new_batch_requires_frozen_v3_at_creation_and_resume(self):
+        self.wire_git()
+        path = self.parent / 'repo-topic-map.json'
+        del self.topic['h3_rule_version']
+        create.save_json(path, self.topic)
+        with self.assertRaisesRegex(ValueError, 'h3_rule_version'):
+            self.build(dry=True)
+        self.topic['h3_rule_version'] = 3
+        create.save_json(path, self.topic)
+        self.build()
+        ledger = json.loads((self.parent / create.h3_selection.LEDGER).read_text())
+        self.assertEqual(ledger['h3_rule_sha256'], create.h3_selection.RULE_SHA256)
+        del self.topic['h3_rule_version']
+        create.save_json(path, self.topic)
+        with self.assertRaisesRegex(ValueError, 'h3_rule_version'):
+            self.build()
+
     def test_dry_run_no_files_or_remote_mutations(self):
         self.wire_git()
         before = set(self.parent.rglob("*"))
@@ -287,6 +312,28 @@ class SingleFlow(unittest.TestCase):
         self.assertEqual(result["tasks"][0]["repo"], "selftest/cc10003-01-development")
         self.assertEqual(result["tasks"][0]["folder"], "cc10003-01-development")
         self.assertEqual(result["tasks"][0]["task_id"], "cc10003-01-development")
+
+    def test_h3_screen_before_creation_and_normalized_review_binding(self):
+        self.wire_git()
+        path = self.parent / 'repo-topic-map.json'
+        self.topic['task_plan'][0]['final_prompt_review'] = {'H3': {'verdict': 'needs_evidence'}}
+        create.save_json(path, self.topic)
+        normalized = create.load_topic_map(explicit=path, required=True)
+        self.assertEqual(normalized['final_review_version'], 2)
+        self.assertEqual(normalized['task_plan'][0]['final_prompt_review'], self.topic['task_plan'][0]['final_prompt_review'])
+        card = self.topic['h3_candidates'][0]
+        for update, error in (({'decision': 'needs_evidence'}, '准入候选'), ({'decision': 'replace'}, '准入候选'),
+                              ({'decision': 'admit', 'user_action': ''}, 'user_action')):
+            card.update(update)
+            create.save_json(path, self.topic)
+            with self.assertRaisesRegex(ValueError, error):
+                self.build()
+        del self.topic['h3_candidates'], self.topic['h3_selection_version']
+        create.save_json(path, self.topic)
+        with self.assertRaisesRegex(ValueError, 'h3_selection_version'):
+            self.build()
+        self.assertFalse(self.remote_repos)
+        self.assertFalse((self.parent / 'tasks.xlsx').exists())
 
     def test_background_queue_worker_creates_then_runs_final_full_check(self):
         self.wire_git()
@@ -406,6 +453,7 @@ class SingleFlow(unittest.TestCase):
             slug="bugfix",
             family="Bugfix",
         )
+        self.topic["h3_candidates"][0]["task_type"] = self.topic["task_plan"][0]["task_type"]
         self.topic["task_plan"][0]["domain_fit"].update(
             main_task="修复订单解析错误导致订单数据集缺失；解析订单数据并生成订单数据集",
             prompt_main_request="请修复订单解析错误导致订单数据集缺失；解析订单数据并导出订单数据集。",
@@ -497,6 +545,10 @@ class SingleFlow(unittest.TestCase):
 
     def test_resume_legacy_batch_retains_frozen_ids(self):
         self.wire_git()
+        del self.topic['h3_rule_version']
+        del self.topic['task_plan'][0]['difficulty_design']['design_tradeoff']['path']
+        create.save_json(self.parent / 'repo-topic-map.json', self.topic)
+        create.h3_selection.freeze_selection(self.parent, create.hub.source_remote_url(self.source), self.topic)
         result = self.build()
         entry = result["tasks"][0]
         old_folder = entry["folder"]
@@ -583,6 +635,7 @@ class SingleFlow(unittest.TestCase):
             slug="optimization",
             family="优化既有能力",
         )
+        self.topic["h3_candidates"][0]["task_type"] = self.topic["task_plan"][0]["task_type"]
         self.topic["task_plan"][0]["domain_fit"].update(
             main_task=(
                 "优化现有订单解析链路；重复全量扫描导致结果不稳定，"
@@ -603,6 +656,10 @@ class SingleFlow(unittest.TestCase):
         rows = workbook.read_workbook(self.parent / "tasks.xlsx")
         rows[0]["提示词"] = "真实测试夹具：新增订单导出接口，保留已有订单权限。"
         workbook.write_workbook(self.parent / "tasks.xlsx", rows)
+        self.topic['task_plan'][0]['final_prompt_review'] = {
+            'base_commit': self.commit, 'prompt_sha256': create.h3_selection.digest(rows[0]['提示词']),
+            'H3': {'case_review': {'h3_rule_version': 3, 'decisive_reason': '按批次核账受影响'}}}
+        create.save_json(self.parent / 'repo-topic-map.json', self.topic)
         # Generation quality is covered by corpus/registry suites; isolate the file/reader integration here.
         metadata = {"common": {"repo_id": "orders-test", "domain": "数据工程", "subdirection": "其他",
                               "language": "Python", "frameworks": "stdlib", "repro_level": "已容器化，可一键起环境"},
@@ -633,6 +690,9 @@ class SingleFlow(unittest.TestCase):
             out = handoff.prepare(self.root, "b1111-01", self.parent / "handoff-metadata.json")
         self.assertTrue(out["ok"])
         lib = handoff.runner_lib()
+        ledger = json.loads((self.parent / create.h3_selection.LEDGER).read_text())
+        self.assertEqual([r['stage'] for r in ledger['revisions']], ['selection', 'release'])
+        self.assertEqual(ledger['revisions'][-1]['records'][0]['prompt_sha256'], create.h3_selection.digest(rows[0]['提示词']))
         record = lib.load_task(task)
         self.assertEqual(lib.task_dirs(self.root, "b1111-01"), [task])
         self.assertEqual(record["execution_mode"], "single")

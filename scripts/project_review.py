@@ -67,7 +67,7 @@ REVIEW_FIELDS = {
 }
 
 
-def final_review_errors(prompt: str, base_commit: str, review, *, axes=tuple(REVIEW_FIELDS)) -> list[str]:
+def final_review_errors(prompt: str, base_commit: str, review, *, axes=tuple(REVIEW_FIELDS), require_h3_case=False, require_compliant=False, rule_version=None) -> list[str]:
     digest = hashlib.sha256(prompt.encode()).hexdigest()
     if not re.fullmatch(r'[a-fA-F0-9]{40}|[a-fA-F0-9]{64}', str(base_commit or '')):
         return ['独立复核必须绑定实际基准提交的完整 Git 摘要']
@@ -86,8 +86,78 @@ def final_review_errors(prompt: str, base_commit: str, review, *, axes=tuple(REV
             errors.append(f'{axis} 必须引用最终正文里的连续业务条件')
         if not all(isinstance(row.get(key), str) and row[key].strip() for key in fields):
             errors.append(f'{axis} 独立复核缺少业务依据 {", ".join(fields)}')
-        elif axis == 'H3' and row['outcome_a'].strip() == row['outcome_b'].strip():
+        elif (axis == 'H3' and row['outcome_a'].strip() == row['outcome_b'].strip()
+              and not (require_compliant and isinstance(row.get('case_review'), dict)
+                       and row['case_review'].get('path') == 'engineering')):
             errors.append('H3 在同一输入下得到相同终态，重新选择冲突轴')
         elif axis == 'H2' and row['producer'].strip() == row['consumer'].strip():
             errors.append('H2 上下游相同，回源找到独立消费者及业务结果')
+    if 'H3' in axes and (require_h3_case or require_compliant):
+        h3 = review.get('H3')
+        case = h3.get('case_review') if isinstance(h3, dict) else None
+        if not isinstance(case, dict):
+            errors.append('H3 缺少 case_review，从终稿独立推演一个能区分两种设计的实例')
+        else:
+            if rule_version == 3:
+                if type(case.get('h3_rule_version')) is not int or case['h3_rule_version'] != rule_version:
+                    errors.append('H3 case_review 须绑定本批 h3_rule_version=3')
+                for field in ('decision_unit', 'decision_stage'):
+                    if not isinstance(case.get(field), str) or not case[field].strip():
+                        errors.append(f'H3 case_review.{field} 缺少约束作用域')
+            for field in ('risk_excerpt', 'observation'):
+                quote = case.get(field)
+                if not isinstance(quote, str) or not quote.strip() or quote not in prompt:
+                    errors.append(f'H3 case_review.{field} 须逐字引用终稿风险或实际观察场景')
+            for field in ('basis_a', 'basis_b', 'naive_result'):
+                if not isinstance(case.get(field), str) or not case[field].strip():
+                    errors.append(f'H3 case_review.{field} 缺少具体观察或依据')
+            if require_compliant:
+                fields = ['simplest_compliant_solution', 'remaining_cost', 'decisive_reason']
+                if case.get('path') == 'engineering':
+                    fields += ['failure_window', 'responsibility_a', 'responsibility_b']
+                    if str(case.get('responsibility_a')).strip() == str(case.get('responsibility_b')).strip():
+                        errors.append('H3 工程路径缺少不同的窗口责任')
+                elif case.get('path') != 'business':
+                    errors.append('H3 路径应为 business 或 engineering')
+                for field in fields:
+                    if not isinstance(case.get(field), str) or not case[field].strip():
+                        errors.append(f'H3 case_review.{field} 缺少独立推演')
+                if case.get('simplest_compliant_solution') == case.get('naive_result'):
+                    errors.append('H3 最简单合规做法须独立于错误做法的后果')
+            if case.get('basis_a') and case.get('basis_a') == case.get('basis_b'):
+                errors.append('H3 两条路径的适用依据或保护边界必须分别说明')
     return errors
+
+
+def main() -> int:
+    """Print only the final prompt and its binding for an independent review."""
+    import argparse
+    from preflight_batch import _load_candidates
+
+    parser = argparse.ArgumentParser(description='从候选文件导出单题独立复核输入')
+    parser.add_argument('--candidates-file', required=True, type=Path)
+    parser.add_argument('--topic-map', required=True, type=Path)
+    parser.add_argument('--folder', required=True)
+    args = parser.parse_args()
+    try:
+        candidates = _load_candidates(args.candidates_file)
+        topic = json.loads(args.topic_map.read_text(encoding='utf-8'))
+        base_commit = topic.get('base_commit') if isinstance(topic, dict) else None
+        if not isinstance(base_commit, str) or not re.fullmatch(r'[a-fA-F0-9]{40}|[a-fA-F0-9]{64}', base_commit):
+            raise ValueError('题位图缺少基线提交摘要')
+        matches = [r for r in candidates if (r.get('folder') or r.get('子文件夹名称')) == args.folder]
+        if len(matches) != 1:
+            raise ValueError('候选文件中必须恰有一份该题定稿')
+        prompt = matches[0].get('prompt') or matches[0].get('提示词')
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError('题面为空')
+        prompt = prompt.strip()
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    print(json.dumps({'base_commit': base_commit, 'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(),
+                      **{k: topic[k] for k in ('h3_rule_version',) if k in topic}, 'prompt': prompt}, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

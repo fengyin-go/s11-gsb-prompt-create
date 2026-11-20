@@ -256,8 +256,31 @@ class DifficultyContractTest(unittest.TestCase):
             self.repo,
         )
 
+    def test_v3_engineering_can_have_equal_values_with_distinct_responsibilities(self):
+        design = self.topic['task_plan'][0]['difficulty_design']
+        tradeoff = design['design_tradeoff']
+        tradeoff.update(path='engineering', failure_window='补写完成后到下游读取之前',
+                       correctness_test='让下游在恢复期间读取一次，再检查旧批次是否完整')
+        first, second = tradeoff['option_analysis']
+        first['responsibility'] = '发布者在确认之前保护完整旧版本'
+        second.update(responsibility='消费者在读取时核实已发布的完整版本',
+                      correctness_effect=first['correctness_effect'], observable_result=first['observable_result'])
+        def check():
+            return difficulty_contract._design_errors(design, where='V3', repo=self.repo, rule_version=3)
+        self.assertEqual(check(), [])
+        second['responsibility'] = first['responsibility']
+        self.assertTrue(any('responsibility' in msg for msg in check()))
+        tradeoff['path'] = 'business'
+        self.assertTrue(any('不同的可观察结果' in msg for msg in check()))
+
     def test_valid_contract_passes(self):
         self.assertEqual(self.errors(), [])
+
+    def test_final_review_v2_cannot_skip_final_prompt_review(self):
+        self.topic.update(final_review_version=2, base_commit='a' * 40)
+        self.assertTrue(any('final_prompt_review' in msg for msg in self.errors()))
+        self.topic['final_review_version'] = 3
+        self.assertTrue(any('无法识别 final_review_version' in msg for msg in self.errors()))
 
     def test_all_20261115_platform_difficulty_rejections_fail_without_contract(self):
         self.assertEqual(len(REJECTIONS), 13)

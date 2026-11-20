@@ -548,11 +548,15 @@ def check(
     rows: list[dict] = []
     violations: list[dict] = []
     justified: list[dict] = []
-    base_commit = None
+    base_commit = rule_version = None
     if batch_dir and (batch_dir / 'final-prompt-reviews').is_dir():
         manifest = batch_dir / 's11-task-repos.json'
         if manifest.is_file():
-            base_commit = json.loads(manifest.read_text(encoding='utf-8')).get('base_commit')
+            binding = json.loads(manifest.read_text(encoding='utf-8'))
+            base_commit = binding.get('base_commit')
+            rule_version = binding.get('h3_rule_version')
+    from h3_selection import requires_screening
+    screened = bool(batch_dir and requires_screening(batch_dir))
     for label, task_type, text in items:
         verdict = evaluate(text, task_type)
         row = {"label": label, "task_type": task_type, "prompt": text, **verdict}
@@ -568,7 +572,7 @@ def check(
                 card = json.loads(receipt.read_text(encoding='utf-8'))
             except (OSError, ValueError):
                 pass
-        reviewed = bool(card) and not project_review.final_review_errors(text.strip(), base_commit, card)
+        reviewed = bool(card) and not project_review.final_review_errors(text.strip(), base_commit, card, require_compliant=screened, rule_version=rule_version)
         if reviewed:
             row['independent_review_supported'] = True
         if not row['g16_ok'] and not reviewed:

@@ -10,6 +10,7 @@ from pathlib import Path
 import check_prompt_type_intent
 import difficulty_contract
 import domain_fit
+import h3_selection
 import check_prompt_naturalness
 import prompt_style
 
@@ -24,11 +25,12 @@ def check(candidate: dict, repo: Path) -> dict:
     if any(not str(row.get("提示词") or "").strip() for row in rows):
         return {"ok": False, "errors": ["样稿不能包含空题面"]}
     stages = {
+        "selection": h3_selection.selection_errors(topic_map, repo, required=True, new=True),
         "style": prompt_style.prompt_errors(rows),
         "naturalness": check_prompt_naturalness.check(rows)["errors"],
         "type_intent": check_prompt_type_intent.prompt_errors(rows, topic_map),
         "domain": domain_fit.map_errors(topic_map, repo) + domain_fit.prompt_errors(rows, topic_map),
-        "difficulty": difficulty_contract.prompt_errors(rows, {**topic_map, "final_review_version": 1}, repo),
+        "difficulty": difficulty_contract.prompt_errors(rows, {**topic_map, "final_review_version": 2}, repo),
     }
     return {
         "ok": all(not errors for errors in stages.values()),

@@ -26,9 +26,10 @@ class PreviewAdmissionTest(unittest.TestCase):
                 self.assertFalse(result["stages"]["domain"]["ok"])
                 self.assertFalse(result["stages"]["difficulty"]["ok"])
 
-    def test_all_five_stages_are_required_even_when_other_stages_pass(self):
+    def test_each_stage_is_required_even_when_other_stages_pass(self):
         candidate = {"records": [{"提示词": "新增数据处理能力。"}], "topic_map": {}}
         targets = [
+            "h3_selection.selection_errors",
             "prompt_style.prompt_errors",
             "check_prompt_naturalness.check",
             "check_prompt_type_intent.prompt_errors",

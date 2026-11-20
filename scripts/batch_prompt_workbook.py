@@ -711,12 +711,33 @@ def run_write_gates(
     difficulty_contract_errors = (
         difficulty_contract.prompt_errors(records, topic_map, repo) if topic_map else []
     )
+    import h3_selection
+    repo_manifest = parent / "s11-task-repos.json"
+    binding = json.loads(repo_manifest.read_text()) if repo_manifest.is_file() else {}
+    difficulty_contract_errors += h3_selection.selection_errors(topic_map or {}, repo,
+        required=h3_selection.requires_screening(parent, binding))
+    difficulty_contract_errors += h3_selection.rule_errors(topic_map or {}, parent=parent, manifest=binding)
+    if (topic_map or {}).get('h3_rule_version') == h3_selection.RULE_VERSION and not difficulty_contract_errors:
+        path = parent / h3_selection.LEDGER
+        revisions = json.loads(path.read_text())['revisions'] if path.is_file() else []
+        selected = next((r for r in reversed(revisions) if r['stage'] == 'selection'), None)
+        if not selected or selected['records'] != h3_selection.selection_records(topic_map):
+            difficulty_contract_errors.append('当前候选与冻结选题记录不符，请先登记补证或换位')
+    case_review_folders = set(review_folders or ())
     previous = parent / MANIFEST_FILENAME
     if topic_map and previous.is_file():
         saved = json.loads(previous.read_text(encoding="utf-8"))
-        review_folders = set(review_folders or ()) | set(saved.get("reviewed_prompt_folders", []))
+        case_review_folders.update(saved.get("case_review_folders", []))
+        review_folders = set(saved.get("reviewed_prompt_folders", [])) | case_review_folders
+    if topic_map and topic_map.get('final_review_version') == 2:
+        case_review_folders.update(r['子文件夹名称'] for r in records if str(r.get('提示词') or '').strip())
+        review_folders = set(review_folders or ()) | case_review_folders
     if topic_map and review_folders:
         import project_review
+        map_reviews = {
+            str(plan.get('sequence')): plan.get('final_prompt_review')
+            for plan in topic_map.get('task_plan', []) if isinstance(plan, dict)
+        } if case_review_folders else {}
         for record in records:
             name = record['子文件夹名称']
             if name in review_folders:
@@ -726,8 +747,14 @@ def run_write_gates(
                 except (OSError, ValueError) as exc:
                     difficulty_contract_errors.append(f'{name}：重建无法读取的最终题面复核文件 {receipt.name}（{exc}）')
                     continue
+                if name in case_review_folders:
+                    sequence = difficulty_contract.sequence_for_folder(name)
+                    if review != map_reviews.get(str(sequence)):
+                        difficulty_contract_errors.append(f'{name}：终稿复核文件与题位图中的复核内容不一致')
                 difficulty_errors_for_row = project_review.final_review_errors(
-                    record['提示词'].strip(), topic_map.get('base_commit', ''), review)
+                    record['提示词'].strip(), topic_map.get('base_commit', ''), review,
+                    require_h3_case=name in case_review_folders,
+                    require_compliant=topic_map.get("h3_selection_version") == 1, rule_version=topic_map.get("h3_rule_version"))
                 difficulty_contract_errors.extend(f'{name}：{msg}' for msg in difficulty_errors_for_row)
 
     semantic_prompt_errors = (
@@ -845,6 +872,7 @@ def run_write_gates(
         "ok": not problems,
         "gate_version": GATE_VERSION,
         "reviewed_prompt_folders": sorted(review_folders or []),
+        "case_review_folders": sorted(case_review_folders),
         "problems": problems,
         "domain": {
             "ok": not domain_errors,
@@ -869,6 +897,7 @@ def run_write_gates(
         "difficulty_contract": {
             "ok": not difficulty_contract_errors,
             "version": difficulty_contract.CONTRACT_VERSION,
+            **({"h3_rule_version": topic_map["h3_rule_version"]} if topic_map and "h3_rule_version" in topic_map else {}),
             "problems": difficulty_contract_errors,
         },
         "semantic_identity": {
@@ -956,6 +985,7 @@ def write_generation_manifest(
         "gate_version": gate.get("gate_version"),
         "gate_ok": gate.get("ok"),
         "reviewed_prompt_folders": gate.get("reviewed_prompt_folders", []),
+        "case_review_folders": gate.get("case_review_folders", []),
         "module_counts": (gate.get("theme") or {}).get("module_counts"),
         "topic_policy": (gate.get("theme") or {}).get("topic_policy"),
         "topic_counts": (gate.get("theme") or {}).get("topic_counts"),

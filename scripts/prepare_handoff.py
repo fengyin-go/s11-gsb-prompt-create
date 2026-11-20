@@ -12,6 +12,7 @@ from pathlib import Path
 import batch_prompt_workbook as workbook
 import check_prompt_opportunities
 import domain_fit
+import h3_selection
 import prompt_style
 import platform_contract
 import review_contract
@@ -148,6 +149,12 @@ def _prepare_locked(parent, root, batch, metadata_file, lib):
         raise ValueError("tasks.xlsx 与仓库清单任务缺失、重复或不一致")
     counts = {name: sum(r["任务类型"] == name for r in rows) for name in TYPE_WEIGHTS}
     topic_map = load_topic_map(parent=parent, repo=parent / entries[0]["task_id"] / "origin", required=True)
+    screening = h3_selection.requires_screening(parent, manifest) or topic_map.get("h3_selection_version") == 1
+    if screening:
+        issues = h3_selection.selection_errors(topic_map, parent / entries[0]["task_id"] / "origin", required=True)
+        issues += h3_selection.rule_errors(topic_map, parent=parent, manifest=manifest)
+        if issues:
+            raise ValueError("；".join(issues))
     topic_policy = topic_map.get("type_policy", "capacity-first")
     validate_type_counts(counts, len(rows), policy=topic_policy)
     platform_errors, meta = platform_contract.validate(meta, by_name, topic_map, cfg)
@@ -280,6 +287,10 @@ def _prepare_locked(parent, root, batch, metadata_file, lib):
                           "sha256": hashlib.sha256(generation_manifest_path.read_bytes()).hexdigest(),
                       },
                       "prompt_opportunities": opportunity_binding}
+    if screening:
+        h3_selection.freeze_final(parent, manifest, topic_map, staged)
+        if "h3_rule_version" in topic_map:
+            batch_manifest["h3_rule_version"] = topic_map["h3_rule_version"]
     for target, record, recording in staged:
         save_json(target / "task.json", record)
         save_json(target / "recording-plan.json", recording)

@@ -285,6 +285,8 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
         if plan is None:
             errors.append(f"selected sequence={sequence} 不在 topic map")
             continue
+        if topic_map.get('h3_selection_version') == 1 and opportunity_id != plan.get('opportunity_id'):
+            errors.append(f'selected sequence={sequence} 与 H3 选题的 opportunity_id 不符')
         expected_topic = _text(plan.get("topic"))
         brief_topic = _text(item.get("topic_id") or item.get("topic"))
         if brief_topic != expected_topic:
@@ -318,10 +320,15 @@ def check(repo: str | Path, topic_map_path: str | Path, opportunity_path: str | 
                 f"实际 {selected_modes.get(mode, 0)}"
             )
 
+    screened = {r.get('opportunity_id'): r for r in topic_map.get('h3_candidates', []) if isinstance(r, dict)}
     reserve_modes: Counter[str] = Counter()
     for index, item in enumerate(reserve):
         errors.extend(_brief_errors(repo, item, f"reserve[{index}]", selected=False))
         opportunity_id = _text(item.get("opportunity_id"))
+        if topic_map.get('h3_selection_version') == 1:
+            card = screened.get(opportunity_id, {})
+            if card.get('decision') != 'admit' or card.get('task_type') != item.get('task_type'):
+                errors.append(f'备用机会 {opportunity_id} 缺少同题型的 H3 准入记录')
         if opportunity_id and opportunity_id in seen_opportunity_ids:
             errors.append(f"reserve opportunity_id 重复：{opportunity_id}")
         elif opportunity_id:

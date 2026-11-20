@@ -166,6 +166,7 @@ GitHub 明确返回主/次级限流、HTTP 429 或 `created too many repositorie
   source-snapshot.json                本地目录模式：冻结来源、文件摘要与快照提交
   source-snapshot/                    本地目录模式：独立 Git 快照，作为所有任务仓库的共同 main 基线
   startup-preflight.json
+  h3-decisions.json                   候选判断的各版记录与正式终稿冻结时间
   tasks.xlsx
   creation-queue.json                推荐建仓队列与逐仓状态
   creation-worker.log                后台 worker 日志
@@ -215,12 +216,20 @@ python3 <skill>/scripts/create_source_snapshot.py \
 
 先读 [references/domain-fit.md](references/domain-fit.md)，按题目的主要工作及领域数据结果核验领域准入；再读 [references/semantic-v2-topic-map.md](references/semantic-v2-topic-map.md)，按真实源码和页面建立 `repo-topic-map.json`，`profile` 保留 `gsb-semantic-v2`。topic map 必须写明 `domain`、`subdirection`；每个 topic 写明 `domain_objects`、`domain_results`，每个 `task_plan` 题位写明 v2 `domain_fit`：主任务、领域结果、`domain_chain`、前置 `prompt_main_request`、反事实通用任务和至少两条带行号原文的 `domain_anchors`。`task_plan` 使用上表五个 slug 与任务类型，逐项包含 sequence、topic、family、angle。类型比例不阻塞容量优先计划，同 topic 的多题跨家族并受 seat_capacity 限制。
 
+在设计 A/B 方案之前，先读[冻结的 H3 选题与终稿规则 V3](references/h3-rule-v3.md)，再登记全部 H3 候选。逐项回答哪笔输入触发冲突、用户做什么操作会遇到什么问题、满足全部硬约束后还剩什么选择会改变结果或正确性责任。以机会地图的 `opportunity_id` 关联正式与备用题。缺依据记 `needs_evidence`，证据相悖或回源仍找不到消费场景记 `replace`。两类都保留理由并从正式容量扣除，优先审查同模式备用。补证或换位时保留原候选 ID 和历次判断。具体字段和校准样例见 [H3 正反例](references/h3-platform-cases.md)。
+
+新批次在 `repo-topic-map.json` 写 `h3_rule_version: 3`（H3 语义规则）、`h3_selection_version: 1`（候选格式）和 `final_review_version: 2`（终稿格式）。准入候选用 `decision_unit`、`decision_stage` 写明硬约束的对象和阶段，沿用 `remaining_choice` 与 `reason` 说明实际选择及依据。先保存选题判断，再写 `difficulty_design`。下面的命令只需要候选清单、版本和基准提交，本地快照模式同时传原 `--snapshot-manifest`。
+
+```bash
+python3 <skill>/scripts/h3_selection.py --repo <干净源仓库> --batch-dir <批次目录> --topic-map <批次目录>/repo-topic-map.json
+```
+
 每个题位先确认领域适配和 H1/H2/H3 困难设计，再计入容量、创建仓库。所属仓库是数据工程项目、topic 名叫血缘或圈选，都不能证明题目主体属于数据工程；服务路由、负载均衡、限流降级、权限配额、网关预检、发布流水线和依赖锁默认不属于数据工程，除非它们只是真实数据采集/加工/存储链路的支撑且主工作句明确改变数据结果。通用前端升级、构建、路由或部署不得靠借用两个业务页面取得领域资格。迁移题缺少真实领域目标时换成有源码依据的合格题位，不为配比凑迁移题。
 
 容量沿用语义题位、主体/模式护栏和单仓上限 50、每模式 3；源码派生有 warning 就先修扫描，不猜容量。新主体仅功能开发可用，并遵守原来的限流、跨域和台账规则。扩容只向最大 sequence 后追加；旧序号、类型、topic、family、angle 和仓库保持原样，追加默认保持容量优先；只有显式 strict-ratio 才核对整体比例。不要重排历史题。
 
 ```bash
-python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map.json --repo <源仓库> --expected-base-commit <SHA> --require-domain-fit --require-difficulty-design --require-semantic-dedup
+python3 <skill>/scripts/validate_topic_map.py --map <batch目录>/repo-topic-map.json --repo <源仓库> --expected-base-commit <SHA> --require-domain-fit --require-difficulty-design --require-h3-selection --require-semantic-dedup
 python3 <skill>/scripts/check_prompt_type_intent.py --parent <batch目录> --json
 python3 <skill>/scripts/domain_fit.py --parent <batch目录> --repo <源仓库>
 python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 --source <源仓库> --topic-map <batch目录>/repo-topic-map.json --preflight <batch目录>/startup-preflight.json --start-index 123 --dry-run
@@ -241,7 +250,7 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 
 ## 3. 生成提示词
 
-先按 [references/domain-fit.md](references/domain-fit.md) 逐题复核最终题面的主任务、真实数据链路及可观察领域结果，再读 [references/difficulty-hardening.md](references/difficulty-hardening.md)、[references/generation-rules.md](references/generation-rules.md) 和 [references/natural-prompt-style.md](references/natural-prompt-style.md)，继承原 GSB 的真实代码准入、G16/G19 难度、负向案例、主题去重和跨项目防撞。类型已换为 S11 五类；功能优化按已有能力题审视，依赖升级与迁移必须有真实版本/兼容目标。平台 G16 的基础项数仍是 `Bugfix` 三项、其余至少两项且至少一项硬证据；S11 额外要求每个题位都具备 H1/H2/H3，因为本批平台最终 P5 对全部通过样本都查实了这三项。每题至少牵动两个真实功能模块；普通列表/概览一致不算第二模块。
+先按 [references/domain-fit.md](references/domain-fit.md) 逐题复核最终题面的主任务、真实数据链路及可观察领域结果，再读 [references/difficulty-hardening.md](references/difficulty-hardening.md)、[references/generation-rules.md](references/generation-rules.md) 和 [references/natural-prompt-style.md](references/natural-prompt-style.md)，继承原 GSB 的真实代码准入、G16/G19 难度、负向案例、主题去重和跨项目防撞。类型已换为 S11 五类；功能优化按已有能力题审视，依赖升级与迁移必须有真实版本/兼容目标。平台 G16 的基础项数仍是 `Bugfix` 三项、其余至少两项且至少一项硬证据；S11 额外要求每个题位都具备 H1/H2/H3，用于保证新题可独立论证。平台整体通过包含豁免及人工改判，校准 H3 时须核实单项裁决。每题至少牵动两个真实功能模块；普通列表/概览一致不算第二模块。
 
 交接前还要按 [references/review-readiness.md](references/review-readiness.md) 填写 `review_contract`：需求到业务行为的证据映射、真实测试行为、关键约束句和环境噪声排除项。平台已实测的环境故障、电报式过程描述和泛化测试总数，不能留给运行侧事后猜。不生成上下文隔离声明，也不要求 `context_isolation` 元数据；题面不得限定上下文、会话、记忆或答案来源。
 
@@ -256,20 +265,19 @@ python3 <skill>/scripts/create_batch_tasks.py --parent <root>/batches/b1111-01 -
 
 ### H3 实证裁决模型
 
+终稿复核按[同一份 V3](references/h3-rule-v3.md)执行。先遮住设计卡，用一句话写出满足全文的最简单做法，再具体指出谁在何时会失去哪项原文支持的用途，或竞争与失败窗口中哪一方承担正确性责任。删掉评审自己补的时效、授权或重试资格后，若仍能从题面逐字定位观察场景，才准入。业务路径比较结果；工程路径允许成功终值相同，须比较同一窗口内的责任及可观察后果。在 `final_prompt_review.H3.case_review` 填 `h3_rule_version: 3`、`decision_unit` 和 `decision_stage`，复核字段与校准实例见 [平台 H3 正反例](references/h3-platform-cases.md)。
+
 H3 不是“题面出现冲突”，也不是“登记了两个选项”。每个 `design_tradeoff` 必须完成一张可审计的裁决卡：
 
 1. `trigger` 写真实触发条件：哪份数据、哪两个事件或哪两个版本在同一对象上相遇。
 2. `decision_axis` 写裁决轴，例如完成先后、当前版本与冻结版本、清理与恢复、迁移切换、权限来源或并发写入顺序。
 3. 每个方案必须在 `option_analysis.preserves_constraint_ids` 中覆盖全部 H1 约束编号。任一方案违反 H1、H2 或共同不变量，就不是 H3，直接淘汰。
-4. 每个方案必须分别写 `correctness_effect` 和 `observable_result`，且至少有两个互不相同的正确性后果和用户可观察结果。只改变类结构、锁类型、函数拆分、重试次数或页面提示，不算 H3。
+4. 每个方案必须分别写 `correctness_effect` 和 `observable_result`，业务路径给出不同的业务后果。工程路径可有相同的成功终值，填写 `design_tradeoff.path=engineering`、`failure_window`、`correctness_test` 和每个 `option_analysis[].responsibility`，说明触发顺序、保证位置与核对操作。业务路径填写 `design_tradeoff.path=business`。只改变类结构、锁类型、函数拆分、重试次数或页面提示，不算 H3。
 5. `outcome_invariant` 是两种方案都必须守住的共同边界，例如“只能有一个确认版本”“下游不能读到半成品”；它不是某一方案的胜负。
-6. 题面只能呈现冲突和共同不变量，不能提前写“必须采用新版本”“必须保护引用快照”“不能写回旧值”等分支胜负。`prompt_keeps_choice_open`、`both_options_valid`、`choice_changes_correctness` 必须为 `true`，`fixed_branch_excluded` 必须为 `true`，`false_h3_guards` 八项必须全为 `false`。
+6. 题面自然交代冲突、受影响的操作或错误后果和共同不变量，不能提前写“必须采用新版本”“必须保护引用快照”“不能写回旧值”等分支胜负。`prompt_keeps_choice_open`、`both_options_valid`、`choice_changes_correctness` 必须为 `true`，`fixed_branch_excluded` 必须为 `true`，`false_h3_guards` 八项必须全为 `false`。
 7. `context_anchors` 至少两条，一条 `supports=trigger`，另一条支撑 `option_a` 或 `option_b`；只指向 `STATUS_ORDER`、函数名或通用 CRUD 代码不算真实取舍依据。
 
-新增的 `source_selection_only` 和 `equivalent_user_outcome` 必须为 `false`：两个方案不能只是
-输入来源、锁、队列或写入机制不同，也不能在数据版本、下游文件、通知或用户页面上得到近似
-相同结果。删掉题面的固定裁决句后，如果一条路径必须违反 H1，或两种路径最终数据结果相同，
-该项不是 H3，必须换题。
+`source_selection_only` 和 `equivalent_user_outcome` 必须为 `false`。核对同一输入与观察时点下的取数结果、写入可见性、拒绝或恢复责任。两种设计可以有相同的正常终值。按 V3 核对题面确实留下的其他决定；准入、待核、换位及其缺证理由均按冻结规则登记。
 
 正向校准是 `14-bugfix`：清理回执与恢复事件同时更新同一检查点时，既可以让清理终态获胜并延后恢复，也可以让恢复终态获胜并延后清理；两种都满足“只能有一个确认版本”，但路径释放、恢复入口和下游可见结果不同。
 反向校准是 `10-development` 和 `11-bugfix`：前者已规定引用快照不可清理，后者已规定旧配置不能写回；第二个方案被 H1 排除，题面没有留下真实裁决。
@@ -368,6 +376,12 @@ python3 <skill>/scripts/domain_fit.py --parent <batch目录> --repo <任务目�
 python3 <skill>/scripts/check_prompt_difficulty.py --parent <batch目录>
 python3 <skill>/scripts/check_prompt_dedup.py --parent <batch目录> --include-history
 python3 <skill>/scripts/check_cross_project_prompts.py --batch-dir <batch目录> --registry <注册表> --require-registry --require-coverage --min-peer-batches 1 --require-platform-corpus
+```
+
+交接写入可运行任务前，脚本冻结终稿 SHA、源码基线、对应候选及复核理由。收到回执后按批次执行下列只读复盘命令，可重复传 `--batch-dir` 汇总多个批次。累计至少两个来源项目、20 条明确 H3 裁决时复盘一次，期间照常生产。`released_by_h3_rule` 按冻结的规则版本汇总回执，历史无版本记录列入 `legacy`。生产回执统计已交接且 H3 明确获判的题中有多少被判 H3 不成立。目标漏放率另以平台明确 H3 不成立的坏题为分母，误拦率以明确 H3 成立的好题为分母；在遮标签回测中将待核、换位都计入拦截。
+
+```bash
+python3 <skill>/scripts/h3_outcomes.py --batch-dir <批次目录> --live
 ```
 
 批次已经产生平台回执后，新增失败先做责任归因，不能把所有作废都改写成 Feedback：

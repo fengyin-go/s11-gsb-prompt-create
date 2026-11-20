@@ -420,6 +420,7 @@ def check(
                 repo=repo,
                 max_per_mode=3,
                 topic_map=topic,
+                review_folders=provided_folders,
             )
             _collect_write_gate(collector, gate)
         except (OSError, ValueError, SystemExit) as exc:

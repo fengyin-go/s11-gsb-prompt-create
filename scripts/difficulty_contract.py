@@ -292,7 +292,7 @@ def _tradeoff_conflict_errors(prompt: str, excerpt: str) -> list[str]:
     return []
 
 
-def _sequence_for_folder(folder: str) -> int | None:
+def sequence_for_folder(folder: str) -> int | None:
     match = FOLDER_PLAN_RE.search(folder or "")
     return int(match.group(1)) if match else None
 
@@ -338,6 +338,7 @@ def _design_errors(
     where: str,
     repo: Path | None,
     prompt: str = "",
+    rule_version: int | None = None,
 ) -> list[str]:
     errors: list[str] = []
     if not isinstance(design, dict):
@@ -488,6 +489,13 @@ def _design_errors(
     if not isinstance(tradeoff, dict):
         errors.append(f"{where} 缺少 design_tradeoff")
         tradeoff = {}
+    engineering = rule_version == 3 and tradeoff.get('path') == 'engineering'
+    if rule_version == 3 and tradeoff.get('path') not in ('business', 'engineering'):
+        errors.append(f'{where} design_tradeoff.path 必须为 business 或 engineering')
+    if engineering:
+        for field in ('failure_window', 'correctness_test'):
+            if not isinstance(tradeoff.get(field), str) or not tradeoff[field].strip():
+                errors.append(f'{where} 工程路径缺少 {field}')
     if len(_text(tradeoff.get("decision"))) < 8:
         errors.append(f"{where} 的 design_tradeoff.decision 至少要有 8 个字符")
     decision_axis = _text(tradeoff.get("decision_axis"))
@@ -550,6 +558,7 @@ def _design_errors(
     if not isinstance(analysis, list):
         analysis = []
     analyzed: set[str] = set()
+    responsibilities: set[str] = set()
     correctness_effects: list[str] = []
     observable_results: list[str] = []
     for index, item in enumerate(analysis):
@@ -561,6 +570,12 @@ def _design_errors(
         if option not in options or option in analyzed:
             errors.append(f"{label}.option 必须唯一对应 options 中的真实方案")
         analyzed.add(option)
+        if engineering:
+            value = item.get('responsibility')
+            responsibility = value.strip() if isinstance(value, str) else ''
+            if not responsibility or responsibility in responsibilities:
+                errors.append(f'{label}.responsibility 须分别说明各方案的保证位置或时点')
+            responsibilities.add(responsibility)
         for key in ("benefit", "cost", "viable_when", "correctness_effect", "observable_result"):
             if len(_text(item.get(key))) < 12:
                 errors.append(
@@ -588,32 +603,33 @@ def _design_errors(
             observable_results.append(observable_result)
     if set(options) - analyzed or len(analyzed) < 2:
         errors.append(f"{where} 的 design_tradeoff.option_analysis 必须覆盖至少两个方案的实际代价")
-    if len(set(correctness_effects)) < len(options):
-        errors.append(f"{where} 的每个 H3 方案必须产生不同的正确性影响")
-    if len(set(observable_results)) < len(options):
-        errors.append(f"{where} 的每个 H3 方案必须有不同的可观察结果")
-    for left, right in itertools.combinations(analysis, 2):
-        if not isinstance(left, dict) or not isinstance(right, dict):
-            continue
-        left_option = _text(left.get("option"))
-        right_option = _text(right.get("option"))
-        left_effect = _text(left.get("correctness_effect"))
-        right_effect = _text(right.get("correctness_effect"))
-        left_result = _text(left.get("observable_result"))
-        right_result = _text(right.get("observable_result"))
-        effect_same, effect_evidence = _equivalent_option_outcome(
-            left_effect, right_effect
-        )
-        result_same, result_evidence = _equivalent_option_outcome(
-            left_result, right_result
-        )
-        if effect_same or result_same:
-            evidence = effect_evidence if effect_same else result_evidence
-            errors.append(
-                f"{where} 的 H3 方案「{left_option}」与「{right_option}」"
-                f"只是来源或机制不同，正确性影响/用户结果近似相同（{evidence}）；"
-                "两方案必须改变不同的数据状态、版本边界或下游产物"
+    if not engineering:
+        if len(set(correctness_effects)) < len(options):
+            errors.append(f"{where} 的每个 H3 方案必须产生不同的正确性影响")
+        if len(set(observable_results)) < len(options):
+            errors.append(f"{where} 的每个 H3 方案必须有不同的可观察结果")
+        for left, right in itertools.combinations(analysis, 2):
+            if not isinstance(left, dict) or not isinstance(right, dict):
+                continue
+            left_option = _text(left.get("option"))
+            right_option = _text(right.get("option"))
+            left_effect = _text(left.get("correctness_effect"))
+            right_effect = _text(right.get("correctness_effect"))
+            left_result = _text(left.get("observable_result"))
+            right_result = _text(right.get("observable_result"))
+            effect_same, effect_evidence = _equivalent_option_outcome(
+                left_effect, right_effect
             )
+            result_same, result_evidence = _equivalent_option_outcome(
+                left_result, right_result
+            )
+            if effect_same or result_same:
+                evidence = effect_evidence if effect_same else result_evidence
+                errors.append(
+                    f"{where} 的 H3 方案「{left_option}」与「{right_option}」"
+                    f"只是来源或机制不同，正确性影响/用户结果近似相同（{evidence}）；"
+                    "两方案必须改变不同的数据状态、版本边界或下游产物"
+                )
     for key in (
         "both_options_valid",
         "choice_changes_correctness",
@@ -736,8 +752,9 @@ def _design_errors(
     return errors
 
 
-def map_errors(topic_map: dict[str, Any], repo: Path | None) -> list[str]:
-    errors: list[str] = []
+def map_errors(topic_map: dict[str, Any], repo: Path | None, *, require_selection=False) -> list[str]:
+    from h3_selection import selection_errors
+    errors = selection_errors(topic_map, repo, required=require_selection)
     try:
         version = int(topic_map.get("difficulty_contract_version") or 0)
     except (TypeError, ValueError):
@@ -756,6 +773,7 @@ def map_errors(topic_map: dict[str, Any], repo: Path | None) -> list[str]:
                 plan.get("difficulty_design"),
                 where=f"task_plan sequence {sequence}",
                 repo=repo,
+                rule_version=topic_map.get("h3_rule_version"),
             )
         )
     return errors
@@ -786,16 +804,29 @@ def prompt_errors(
         if not prompt:
             continue
         folder = _text(record.get("子文件夹名称"))
-        sequence = _sequence_for_folder(folder)
+        sequence = sequence_for_folder(folder)
         if sequence is None or sequence not in plans:
             errors.append(f"{folder or '未命名'} 找不到对应的 task_plan sequence")
             continue
         seen.add(sequence)
         plan = plans[sequence]
-        if topic_map.get('final_review_version') == 1:
+        review_version = topic_map.get('final_review_version')
+        if review_version is not None and (type(review_version) is not int or review_version not in (1, 2)):
+            errors.append(f'{folder}：无法识别 final_review_version={review_version!r}')
+        if review_version in (1, 2):
             errors.extend(f'{folder}：{message}' for message in project_review.final_review_errors(
-                prompt, topic_map.get('base_commit', ''), plan.get('final_prompt_review')))
+                prompt, topic_map.get('base_commit', ''), plan.get('final_prompt_review'),
+                require_h3_case=review_version == 2, require_compliant=topic_map.get("h3_selection_version") == 1,
+                rule_version=topic_map.get("h3_rule_version")))
 
+        if topic_map.get('h3_rule_version') == 3:
+            review = plan.get('final_prompt_review') or {}
+            h3 = review.get('H3') if isinstance(review, dict) else None
+            case = h3.get('case_review') if isinstance(h3, dict) else None
+            design = plan.get('difficulty_design')
+            tradeoff = design.get('design_tradeoff') if isinstance(design, dict) else None
+            if isinstance(case, dict) and isinstance(tradeoff, dict) and case.get('path') != tradeoff.get('path'):
+                errors.append(f'{folder} 的 H3 终稿路径与设计卡不一致，重新核对终稿及其有效取舍')
         if _text(record.get("任务类型")) != _text(plan.get("task_type")):
             errors.append(f"{folder} 的任务类型与 task_plan sequence {sequence} 不一致")
         errors.extend(
@@ -803,6 +834,7 @@ def prompt_errors(
                 plan.get("difficulty_design"),
                 where=f"{folder} (sequence {sequence})",
                 repo=repo,
+                rule_version=topic_map.get("h3_rule_version"),
                 prompt=prompt,
             )
         )

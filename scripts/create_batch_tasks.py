@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Iterator
 
 import batch_prompt_workbook as workbook
+import h3_selection
 import domain_fit
 import difficulty_contract
 import semantic_dedup
@@ -382,7 +383,11 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
     type_intent_errors = check_prompt_type_intent.hint_errors(topic_map)
     if type_intent_errors:
         raise ValueError("任务类型语义未通过：" + "；".join(type_intent_errors))
-    difficulty_errors = difficulty_contract.map_errors(topic_map, source)
+    frozen_manifest = next((read_json(parent / name) for name in (MANIFEST, QUEUE_FILE)
+                            if (parent / name).is_file()), {})
+    difficulty_errors = difficulty_contract.map_errors(
+        topic_map, source, require_selection=not existing_batch or h3_selection.requires_screening(parent, frozen_manifest))
+    difficulty_errors += h3_selection.rule_errors(topic_map, parent=parent, manifest=frozen_manifest, new=not existing_batch)
     if difficulty_errors:
         raise ValueError("困难设计契约未通过：" + "；".join(difficulty_errors))
     if topic_map.get("base_commit") != commit:
@@ -439,6 +444,12 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             "snapshot_tree": snapshot["snapshot_tree"],
             "snapshot_file_count": snapshot["file_count"],
         })
+    if topic_map.get("h3_selection_version") == 1:
+        source_manifest_fields["h3_selection_version"] = 1
+        if "h3_rule_version" in topic_map:
+            source_manifest_fields["h3_rule_version"] = topic_map["h3_rule_version"]
+        if not dry_run and not verify:
+            h3_selection.freeze_selection(parent, source_manifest_fields.get("source_dir") or source_reference, topic_map)
     tasks, failed, created, skipped = [], [], [], []
     selected_folders = set(only_folders) if only_folders is not None else None
     for item in topic_map["task_plan"]:
@@ -566,6 +577,7 @@ def create_batch(parent, source, topic_path, *, preflight=None, owner=None, dry_
             "structure": "origin + workspace", "branches": ["main"], "tasks": tasks,
             "workbook": str(parent / "tasks.xlsx"), "preflight": evidence,
             "source_mode": source_manifest_fields["source_mode"],
+            "h3_selection_version": topic_map.get("h3_selection_version"),
             "source_name": base_repo_name,
             "source_repo": source_reference,
             "base_commit": commit,
@@ -652,6 +664,13 @@ def freeze_queue(parent, source, topic_path, *, preflight, owner=None, start_ind
         "final_verification": previous.get("final_verification") or {},
         "tasks": tasks,
     }
+    if planned.get("h3_selection_version"):
+        topic = load_topic_map(explicit=topic_path, expected_base_commit=planned["base_commit"], required=True)
+        project = read_json(snapshot_path)["source_dir"] if snapshot_path else planned["source_repo"]
+        h3_selection.freeze_selection(parent, project, topic)
+        queue["h3_selection_version"] = 1
+        if "h3_rule_version" in topic:
+            queue["h3_rule_version"] = topic["h3_rule_version"]
     save_queue(parent, queue)
     return _queue_summary(parent, queue)
 

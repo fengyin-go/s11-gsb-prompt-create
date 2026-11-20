@@ -38,6 +38,7 @@ def main() -> None:
         action="store_true",
         help="要求新批次提供 semantic_identity 和同 topic 对比契约",
     )
+    parser.add_argument("--require-h3-selection", action="store_true", help="新批次要求选题三问与源码证据")
     args = parser.parse_args()
 
     try:
@@ -59,11 +60,15 @@ def main() -> None:
             )
             if errors:
                 raise TopicMapError("；".join(errors))
-        if args.require_difficulty_design:
+        if args.require_difficulty_design or args.require_h3_selection:
             errors = difficulty_contract.map_errors(
                 topic_map,
                 Path(args.repo).expanduser().resolve() if args.repo else None,
+                require_selection=args.require_h3_selection,
             )
+            if args.require_h3_selection:
+                import h3_selection
+                errors.extend(h3_selection.rule_errors(topic_map, parent=Path(topic_map["source"]).parent, new=True))
             if errors:
                 raise TopicMapError("；".join(errors))
         semantic_errors = semantic_dedup.map_errors(

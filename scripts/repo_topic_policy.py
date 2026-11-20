@@ -169,6 +169,7 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
             raise TopicMapError(f"{where} 的 semantic_contrast 必须是数组")
         task_plan.append(
             {
+                **{key: raw[key] for key in ("opportunity_id", "final_prompt_review") if key in raw},
                 "sequence": sequence,
                 "slug": slug,
                 "task_type": task_type,
@@ -201,6 +202,7 @@ def normalize_topic_map(payload: dict[str, Any], *, source: Path | None = None) 
         "domain": str(payload.get("domain") or "").strip(),
         "subdirection": str(payload.get("subdirection") or "").strip(),
         "base_commit": str(payload.get("base_commit") or "").strip(),
+        **{key: payload[key] for key in ("h3_rule_version", "h3_selection_version", "h3_candidates", "final_review_version") if key in payload},
         "difficulty_contract_version": payload.get("difficulty_contract_version"),
         "dedup_contract_version": payload.get("dedup_contract_version"),
         "max_capacity": max_capacity,
